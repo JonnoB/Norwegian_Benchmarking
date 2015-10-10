@@ -1,0 +1,314 @@
+---
+title: "WMO Comparison"
+author: "Jonathan Bourne PGCMA"
+date: "10 June 2015"
+output:
+  pdf_document:
+    latex_engine: xelatex
+toc: yes
+---
+
+```{r, echo=FALSE}
+library(knitr)
+opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+
+```{r}
+packages <- c( "openxlsx","dplyr", "tidyr", "ggplot2", "xtable","caret", "gridExtra") 
+
+invisible(lapply(packages, require, character.only= TRUE))
+
+if (!exists("basewd")){
+  basewd <-"~" #replace with getwd()
+  setwd(basewd)
+  }  else {setwd(basewd)}
+
+setwd(file.path(basewd,"VVOinvestigation"))
+WMOdata <- read.xlsx("VVO all variables.xlsx",1)
+options(xtable.comment=FALSE)
+select <- dplyr::select
+
+```
+
+
+```{r}
+costs <- read.xlsx("Variable Cost per plant 2014 with avg.xlsx", sheet= 1, startRow = 3) #"Variable Cost per plant 2014.xlsx"
+costs$sap.code <- sprintf("%04d",as.integer(as.character(costs$sap.code)))
+costs<- inner_join(costs, WMOdata, by = "sap.code" ) %>%
+  rename( d.costs = PG.COST.booked.on.PP.level) #PG.COST.booked.on.PP.level #avg_09_14
+
+f <- sum(costs$d.costs)/sum(costs$VVO) #148.3*10^3 #average NOK per VVO
+costs$VVO.cash <- costs$VVO*f
+costs <- costs %>% filter(d.costs >= -350*10^3)
+```
+
+```{r,results='hide'}
+x6.costs <- select(costs, sap.code, d.costs, Aggregat:Class.3)
+set.seed(2370)
+train <- sample(nrow(x6.costs),0.8*floor(nrow(x6.costs)))
+
+x <- train(d.costs ~.,data = x6.costs[,-1], method="lm")
+x2 <- train(d.costs ~.,data = x6.costs[,-1], method="lmStepAIC")
+x3 <- train(d.costs ~Installert.effekt,data = x6.costs[,-1], method="lm")
+x5 <- train(d.costs ~VVO,data = select(costs, d.costs, VVO), method="lm") #costs[,c(7,54)]
+
+```
+
+
+```{r}
+#Calculate adjusted R squared for the VVO model
+rsq <- 1 - sum((costs$d.costs-costs$VVO.cash)^2)/sum((costs$d.costs-mean(costs$d.costs))^2)
+reg <- 36
+n <- 150
+adj.rsq <- round(rsq-(1-rsq)*reg/(n-reg-1), 2)
+adj.rsq2 <- round(rsq-(1-rsq)*reg/(nrow(costs)-reg-1), 2)
+```
+
+```{r}
+models <- c("x5","x","x2", "x3")
+IDs <- c("WMO", "Base.reg", "Reduced.reg", "MW.reg")
+result <-  sapply(models, function(n) unlist(summary(eval(parse(text=n)))[8:9]))%>%
+  t %>% round(2) %>% as.data.frame(row.names = IDs)
+result[1,2] <- adj.rsq
+
+RMSE <- sapply(models, function(n) mean((residuals(eval(parse(text=n))))^2)^0.5) %>%
+  round %>% as.integer
+
+result <- cbind(result, RMSE = as.integer(RMSE), Variables = as.integer(c(36,36,17,1)))
+result[1,1:3] <-  c(rsq,adj.rsq,mean((costs$d.costs-costs$VVO.cash)^2)^0.5)
+
+result <- cbind(IDs,result) %>% arrange( RMSE) 
+
+perf <- signif(result$RMSE[3]/result$RMSE[2]-1,3)*100
+```
+
+```{r}
+#makes the chart dataframe
+res <- data.frame(sapply(models, function(n)fitted(eval(parse(text=n)))))
+names(res) <- IDs
+res <- cbind(sap.code= costs$sap.code, costs = costs$d.costs , res)%>% 
+  gather(key= model, value= NOK,-costs, -sap.code)
+res[res$model=="WMO",c(2,4)] <- select(costs, d.costs, VVO.cash) #costs[,c(7,55)]
+res <- mutate(res, diff = costs - NOK)
+
+high <- select(costs, Plant, sap.code, VVO,d.costs, VVO.cash) %>% mutate(diff = abs(d.costs-VVO.cash), model= "WMO") %>%top_n(4,diff) #used to highlight the most wrong plants, not currently used.
+
+cor1 <- cor(res$diff[res$model=="MW.reg"],res$diff[res$model=="WMO"])
+cor2 <- cor(res$diff[res$model=="Base.reg"],res$diff[res$model=="WMO"])
+
+```
+
+
+
+```{r}
+boxplot(abs(diff)~ model, data = res)
+aov_test <- aov(abs(diff)~ model, data = res)
+summary(aov_test)
+res %>% group_by(model) %>% summarise(mean_error = mean(diff), mean_abs_err = mean(abs(diff)))
+t.test(abs(res$diff[res$model== "WMO"]), abs(res$diff[res$model == "Reduced.reg"]), paired = TRUE)
+t.test((res$diff[res$model== "WMO"]), (res$diff[res$model == "Reduced.reg"]), paired = TRUE)
+ggplot(res, aes(x= model, y = log10(abs(diff)))) +geom_boxplot()
+
+cbind(res$diff[res$model== "WMO"], res$diff[res$model == "Reduced.reg"])
+
+reduced <- filter(res, model =="WMO") %>% mutate(NOKmin = NOK -sd(NOK), NOKmax = NOK +sd(NOK))
+
+ggplot(reduced, aes(x=costs, y=NOK))+ stat_smooth(method = lm) + geom_point() +
+ ggtitle("Plot of modelled vs actual direct costs in NOK")+xlab("Actual cost")+
+  ylab("modelled cost")+stat_smooth(method ="lm", se=FALSE) 
+  
+
+```
+
+#Abstract
+The goal of this report was to find out whether the WMO is an effective way to measure power plant and comapany performance. Due to increased granularity in Statkraft cost data we were able to make new regressions using the WMO variables and compare the performance against the WMO. The WMO model was outperformed on all measures by the new regressions (`r perf`% more error than the Reduced regression model) and performed only marginally better than MW alone. Statkraft now has the opportunity to have a substantially better way to measure power plant cost effectiveness and internal/external benchmarking.
+
+##Key Concepts
+* [Multilinear Regression](https://en.wikipedia.org/wiki/Linear_regression)
+* [$R^2$](https://en.wikipedia.org/wiki/Coefficient_of_determination)
+* [Root Mean Square Error](https://en.wikipedia.org/wiki/Root-mean-square_deviation)
+
+\newpage
+
+#Introduction
+The purpose of the WMO model is to control for the technical differences between power plants and so allow a fair cost comparison between them. It's two most common uses are to measure the effectiveness between companies, and measure the cost effectiveness between power plants within a company. This objective is achieved  using the KNOK per WMO ratio (KNOK/WMO).In a model that captured all power plant technical differences, power plants would have the same NOK/WMO if they were operated equally effectively. 
+
+#Method
+Data comes from Statkraft's source material supplied to the WMO benchmark in 2014. Direct cost data was provided by PGAP as a result of a project breaking down cost data to plant level. The total number of plants used was `r nrow(costs)`, Svartisen was classed as an outlier due to having an extreme negative cost (greater than -350KNOK) and was removed. Only plants with WMO data and direct cost data were used from Regions, West, East, Mid, North. Regions outside of Norway were not used in this analysis due to lack of direct cost data. Due to lack of information on how the WMO was made it was assumed that the model had `r n` observations which is approximately twice that of the current data set however it is more likely that the true data set was less than 20 due to costs being agregated at power plant level. In addition to favourble observation assumtions it was assumed that the WMO had only 36 variables the true number is probably closer to 50 as there is a lot of interaction between variables, however due to the complexity of the WMO model and the lack of information on it only 36 variables are assumed, this prevents any accidental disadavantaging of the WMO model relative to the alternatives.
+Three multilinear regression models were made using direct costs per power plant using data from 2014, The Base model used all 36 variables used in the WMO, the Reduced model used 17 of the variables chosen by maximising the AIC, finally a model was created which used only MW. 
+The conversion factor from NOK to WMO was obtained using the Statkraft average KNOK/WMO from the dataset, the WMO's were then converted to their equivalent NOK value.
+Once the the modeled values had all been calculated standard model evaluation criteria were then compared. The coefficient of determination, the adjusted coefficient of determination (correcting for high numbers of variables), and the Root Mean Square Error (RMSE).
+
+#Results
+Table 1 shows that the Multilinear regression models performed considerably better than the model based on MW alone or the WMO model. The WMO model out performed the MW model in both RSME and coefficient of determination.
+
+The reduced multilinear model uses approximately half the variables of the WMO and the base model. Although the reduced model does not have such a good RMSE it performs best in adjusted $R^2$ due to maximizing the AIC.
+
+```{r, results='asis'}
+print(xtable(result),type="latex")
+```
+
+
+The WMO model has an average error equivalent to `r round(result$RMSE[3]/f,1)`kNOK/WMO per plant, where the average plant has `r round(mean(costs$VVO),1)` WMO's, this is   `r perf`% higher than the error on the reduced regression.
+
+ \newpage
+ 
+Graph 1 shows how the different models compare in terms of error. The lines for the two Multilienar models are almost identical, whilst the trend of the error for the WMO and MW models are similar, suggesting that the WMO model doesn't achieve its goal of avoiding a MW bias, as it's error tracks the error of og the MW model. This is supported by data as the error in the WMO has a `r signif(cor1,3)` correlation with the MW regression where as there is only a `r signif(cor2,3)` correlation with the Base regression, 
+
+
+```{r}
+ggplot(filter(res, model!="x"), aes(x=costs, y=diff, colour= model))+geom_point() +
+  geom_abline(intercept = 0, slope = 0)+ggtitle("Plot of Error vs actual direct costs in NOK")+xlab("Actual cost")+
+  ylab("Error")+stat_smooth(method ="lm", se=FALSE)
+```
+
+Each point shows the error in the models estimation of cost, points closer to the black line have less error and those further away have more. All models show increasing error as the actual cost of the power plants increase however this trend is considerably smaller in the Multilinear models.
+
+#Conclusions
+The WMO model has substantially more error than the reduced regression even though the WMO's were scaled to fit the data set, in addition the adjusted $R^2$ of WMO is low despite it being assumed that it had many more plants in it's original data set than the multilinear regressions. If it had been assumed that the WMO had a similar number of observations as the Multilinear regressions the adjusted $R^2$ would have been `r adj.rsq2` which is lower than the MW model.
+
+Using a linear regression will make comparing costs between power plants more accurate, expanding the use of the model to the whole WMO group would be a big boost for Norwegian Hydro understanding and cost awareness, and greatly reduce the error in inter-company comparison.
+Another Advantage of using a Multilinear model is that we can see what are the cost drivers in out power plant fleet, which may be helpful in optimising maintenance or planning modifications.
+
+Further work should be done to create a model similar to the reduced regression model, expanding the data set and increase the number of years worth of cost data to reduce random noise, also it may be interesting to consider the interaction between the variables.
+
+\newpage
+
+#Appendix
+
+##Counting variables in the WMO
+
+##Variables Used in in the WMO model and Base Regression
+
+```{r}
+  vars <- names(x6.costs[,-1]) %>% 
+  matrix( nrow= 12) %>% 
+  as.data.frame %>% 
+  xtable
+```
+
+.
+```{r, results ='asis'}
+
+  print(vars, type="latex")
+
+```
+
+##Variables used in the Reduced Regression
+
+```{r, results='asis'}
+names(coefficients(x2$finalModel))[-1] %>%
+  matrix(ncol=3) %>%
+  as.data.frame %>%
+  xtable %>%
+  print(type ="latex")
+```
+
+\newpage
+
+#Appendix
+
+Experimental work to improve the regression, this section is kept seperate from the rest of the report as it cleans the data and removes errors which cannot be done for the WMO, whilst this is a good idea in model building, some could argue that it puts the WMO at a disadvantage, the seperation of the main body of the report and this section is to avoid such a discussion undermining the overall message that the WMO does not perform as well as using statistical methods.
+
+```{r}
+#code rolls up repeated powerplants into single SAP code however this won't be used for this demonstration as it makes it difficult to create a sensible model without risking disadvantaging the VVO model.
+library(openxlsx)
+setwd(file.path("~","VVOinvestigation"))
+WMOdatax <- read.xlsx("VVO all variables.xlsx",1)
+shuffle <- 1:42 %in% c(4,1:3,5,12:13,16:18,21,23:26)
+WMOdatax <- WMOdatax[,c((1:42)[shuffle], (1:42)[!shuffle])]
+x <- WMOdatax[,1:15] %>% group_by(sap.code) %>% summarise_each(funs(first))
+x2 <- WMOdatax[,c(4,16:42)] %>% group_by(sap.code) %>% summarise_each(funs(sum))
+WMOdatax <- left_join(x, x2, by = "sap.code")
+
+costsx <- read.xlsx("Variable Cost per plant 2014.xlsx", sheet= 1, startRow = 3)
+#costsx <- read.xlsx("Variable Cost per plant 2014.xlsx", sheetIndex= 1, startRow = 3)
+costsx$sap.code <- sprintf("%04d",as.integer(as.character(costsx$sap.code)))
+costsx<- inner_join(costsx, WMOdatax, by = "sap.code" ) %>%
+  mutate(Ln.MVA. = log(Installert.effekt)) %>%
+  rename( d.costs = PG.COST.booked.on.PP.level, Ln.MVA = Ln.MVA. )
+
+
+#check costs per MW
+
+ggplot(costsx, aes(x = Installert.effekt, y = d.costs)) +geom_point()
+ggplot(costsx, aes(x = Ln.MVA, y = d.costs)) +geom_point()
+
+f <- sum(costsx$d.costs)/sum(costsx$VVO) #148.3*10^3 #average NOK per VVO
+costsx$VVO.cash <- costsx$VVO*f
+costsx <- costsx %>% filter(d.costs >= -350*10^3)
+
+
+x6.costs <- select(costsx, sap.code, d.costs, Aggregat:Class.3)
+set.seed(2370)
+train <- sample(nrow(x6.costs),0.8*floor(nrow(x6.costs)))
+x <- train(d.costs ~.,data = x6.costs[,-1], method="lm")
+x2 <- train(d.costs ~.,data = x6.costs[,-1], method="lmStepAIC")
+
+```
+
+
+```{r, eval=FALSE}
+
+res2 <- data.frame(sapply(models, function(n)fitted(eval(parse(text=n)))))
+names(res2) <- IDs
+res2 <- cbind(sap.code= costs$sap.code, costs = costs$d.costs , res)%>% 
+  gather(key= model, value= NOK,-costs, -sap.code)
+res2[res2$model=="WMO",c(2,4)] <- costs[,c(7,55)]
+res2 <- mutate(res2, diff = costs - NOK)
+
+
+res2.test <-res2 %>% arrange(costs) %>% filter(model != "Base.reg", model != "MW.reg")
+res2.2 <-res2 %>% filter(model == c("WMO", "Reduced.reg"))%>%
+  select(-NOK) %>% spread(model, diff) %>% group_by(model) %>% mutate(rank = dense_rank(diff))
+
+res.2 <-res2 %>% filter(model != "Base.reg", model != "MW.reg")%>% group_by(model) %>% mutate(rank = dense_rank(diff)) %>% select(-NOK, -diff) %>% spread(model, rank) %>%
+  mutate(diff= abs(WMO-Reduced.reg)) %>% top_n(5,diff) %>%
+  left_join(costs[,1:2], by="sap.code")
+
+ggplot(res.2, aes(x= ))
+
+```
+
+```{r, eval = FALSE}
+test.raw <- read.xlsx("book6.xlsx", sheetIndex=1, startRow=2, endRow=325, colIndex=1:13)
+test <- test.raw
+test %<>% mutate(sap.code = SAP.Teknisk.plas) %>% 
+  group_by(sap.code) %>% summarise( Units = max(as.numeric(Aggr.Nr)), 
+                                    MW = sum(as.numeric(Merke.effekt..MW.)), 
+                                    Turbin.type= first(Turbin.type),
+                                    head=mean(FallhÃ.yde..m.),
+                                    rpm=mean(rpm),
+                                    flow.rate = sum(VannfÃ.ring)) %>% ungroup 
+
+test2 <- inner_join(test, costs[c(2,7,18:55)], by = "sap.code")%>%
+  mutate(Turbin.type=droplevels(Turbin.type), LN.MVA= log(MW)) %>%
+ select(-Installert.effekt,
+          -Luftputekammer,
+          -Fylke.group,
+          -Reversibel.pumpestasjon.,
+          -Availability.factor..sum.of.D.EBI.,
+          -Height..av.of.D.EBI.,
+          -Climate.factor..for.D.EBI.,
+          -Avstand..total.for.d.EBI.,
+          -Distance.factor,
+          -VVO,
+          -VVO.cash)
+x6 <- train(d.costs~., data = test2[complete.cases(test2),-1], method ="lmStepAIC")
+summary(x6)
+
+mean((residuals(x6)^2)^0.5)
+
+test3 <- test2 %>% select(sap.code,d.costs, Units,	MW,	Turbin.type,	rpm,	flow.rate,Stasjon.i.dagen.,	Aggregat,	Luker.i.dagen..area.,	Roergate.i.dagen,	Ln.MVA.,	Other.maalerstasjoner,	sektor.luker,	flom.luker,	other.luker,	tunnel.og.kanaler..km.,	Class.3)
+
+ test3 %<>% filter(!is.na(Turbin.type)) %>% spread(Turbin.type, Turbin.type) %>%
+  mutate( K = !is.na(K) |!is.na(B), F=!is.na(F) )%>% select(-B,-FP,-P)
+
+x7<- train(d.costs~.,data=test3[,-1],method="lm")
+summary(x7)
+
+test3 <-test3[,c(1,3:19,2)]
+write.xlsx(test3,"model data.xlsx")
+```
+
