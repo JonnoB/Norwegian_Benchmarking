@@ -1,3 +1,4 @@
 # Norwegian_Benchmarking
 The code required to create a Multi-linear model of benchmarking norwegian powerplants and companies using data from the WMO system. The overall goal of this project is to demonstrate that an more accurate alternative to the WMO system can be made using acceptable statistical techniques without providing any additional work for the companies taking part in the benchmarking.
 
+The code is a written to be compiled by R and produce a pdf using LaTeX. The code requires proprietry infomation on powerplant characteristics and costs which are not held on git hub. however the flow of the code and it's overall goals can  be understood. If you are within the benchmarking group and would like to run the code for your company please contact me for details on the files required.
