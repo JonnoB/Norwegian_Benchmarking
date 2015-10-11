@@ -1,0 +1,62 @@
+---
+title: "Open and clean WMO data"
+author: "Jonathan Bourne"
+date: "11. oktober 2015"
+output: html_document
+---
+
+This document will contain the code that can be used to open and the WMO files and extract the data
+
+summaries to take mean, varience total number
+
+Load packages
+```{r}
+
+packages <- c("dplyr", "tidyr", "magrittr", "openxlsx")
+
+lapply(packages, library, character.only = TRUE)
+
+Benchmarking\PA consulting\2015
+file.loc <-file.path("~","Benchmarking", "PA consulting", "2015") #file location may be computer specific depending on network
+setwd(file.loc)
+```
+
+#Extract relevant sheets as data frames
+
+power plant
+```{r}
+power_plant_level <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T Part A - Power plant level", startRow = 12, colNames = FALSE )
+
+names(power_plant_level) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T Part A - Power plant level", startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% names
+```
+
+generator info
+```{r}
+gen_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part B - Spec. generator", startRow = 12, colNames = FALSE )[,1:16]
+
+names(gen_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part B - Spec. generator", startRow = 8, rows = 8:9)[,2:17]%>% names
+
+
+```
+
+
+```{r}
+dam_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part C - Spec. reservoir, EBI", startRow = 12, colNames = FALSE )[,2:11]
+
+names(dam_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,2:11]%>% names
+```
+
+
+```{r}
+gates_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part D - Spec. gates above gr", startRow = 12, colNames = FALSE )
+
+names(gates_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part D - Spec. gates above gr", startRow = 8, rows = 8:9)[,2:10]%>% names
+```
+
+
+```{r}
+valves_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part E - Spec. valves", startRow = 12, colNames = FALSE )
+
+names(valves_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part E - Spec. valves", startRow = 8, rows = 8:9)[,2:6]%>% names
+```
+
