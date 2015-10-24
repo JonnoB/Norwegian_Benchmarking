@@ -29,8 +29,9 @@ extraction functions
 powerplant <- function(filename) {
   power_plant_level <- read.xlsx(filename, sheet = "T Part A - Power plant level", startRow = 12, colNames = FALSE )
   
-  names(power_plant_level) <- read.xlsx(filename, sheet = "T Part A - Power plant level" , startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% names
- power_plant_level 
+  names(power_plant_level) <- read.xlsx(filename, sheet = "T Part A - Power plant level" , startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% names  %>% sub("/", "",.)
+ names(power_plant_level[9]) <- "StorageRoR" ##why doesnt this work?
+  power_plant_level 
 }
 
 gen_spec <- function(filename){
@@ -51,7 +52,7 @@ dam_spec
 gates_spec <- function(filename) {
 gates_spec <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 12, colNames = FALSE )
 
-names(gates_spec) <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 8, rows = 8:9)[,2:10]%>% names
+names(gates_spec) <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 8, rows = 8:9)[,2:10]%>% names %>% sub("/", "",.)
 gates_spec
 }
 
@@ -70,14 +71,21 @@ filename <- "Data Gathering Sheet 2015 V2.xlsx"
 statkraft_powerplant <- powerplant(filename)
 statkraft_genspec <- gen_spec(filename)
 statkraft_damspec <- dam_spec(filename)
-statkraft_gatesspec <- gates_spec(filename)
-statkraft_valvesspec <- valves_spec(filename)
+statkraft_gatespec <- gates_spec(filename)
+statkraft_valvespec <- valves_spec(filename)
 
-stat_names <- c("statkraft_powerplant", "statkraft_genspec", "statkraft_damspec", "statkraft_gatesspec", "statkraft_valvesspec")
+stat_names <- c("statkraft_powerplant", "statkraft_genspec", "statkraft_damspec", "statkraft_gatespec", "statkraft_valvespec")
 
 statkraft <- lapply(stat_names, function(n) eval(parse(text=n)))
 names(statkraft) <- stat_names
 
-write.xlsx(statkraft, file = "Statkraft.xlsx")
+lapply(stat_names, function(n) write.csv(eval(parse(text=n)), 
+                                         paste(n, ".csv", sep=""), 
+                                         row.names = FALSE)
+       )
+
+#write.xlsx(statkraft, file = "Statkraft.xlsx")
+
+#write.xlsx(statkraft_powerplant, file = "power.xlsx")
 
 ```
