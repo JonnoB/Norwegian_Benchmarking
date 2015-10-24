@@ -16,47 +16,68 @@ packages <- c("dplyr", "tidyr", "magrittr", "openxlsx")
 
 lapply(packages, library, character.only = TRUE)
 
-Benchmarking\PA consulting\2015
-file.loc <-file.path("~","Benchmarking", "PA consulting", "2015") #file location may be computer specific depending on network
+
+file.loc <-file.path("~","Benchmarking", "PA consulting", "2015", "Statkraft") #file location may be computer specific depending on network
 setwd(file.loc)
 ```
 
 #Extract relevant sheets as data frames
 
-power plant
+extraction functions
 ```{r}
-power_plant_level <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T Part A - Power plant level", startRow = 12, colNames = FALSE )
 
-names(power_plant_level) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T Part A - Power plant level", startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% names
+powerplant <- function(filename) {
+  power_plant_level <- read.xlsx(filename, sheet = "T Part A - Power plant level", startRow = 12, colNames = FALSE )
+  
+  names(power_plant_level) <- read.xlsx(filename, sheet = "T Part A - Power plant level" , startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% names
+ power_plant_level 
+}
+
+gen_spec <- function(filename){
+gen_spec <- read.xlsx(filename, sheet = "T part B - Spec. generator" , startRow = 12, colNames = FALSE )[,1:16]
+
+names(gen_spec) <- read.xlsx(filename, sheet = "T part B - Spec. generator" , startRow = 8, rows = 8:9)[,2:17]%>% names
+gen_spec
+
+}
+
+dam_spec <- function(filename) {
+  dam_spec <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 12, colNames = FALSE )[,2:11]
+
+names(dam_spec) <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,2:11]%>% names
+dam_spec
+}
+
+gates_spec <- function(filename) {
+gates_spec <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 12, colNames = FALSE )
+
+names(gates_spec) <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 8, rows = 8:9)[,2:10]%>% names
+gates_spec
+}
+
+valves_spec <- function(filename) {
+  valves_spec <- read.xlsx(filename, sheet = "T part E - Spec. valves", startRow = 12, colNames = FALSE )
+
+names(valves_spec) <- read.xlsx(filename, sheet = "T part E - Spec. valves", startRow = 8, rows = 8:9)[,2:6]%>% names
+valves_spec
+}
+
 ```
 
-generator info
+Statkraft files
 ```{r}
-gen_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part B - Spec. generator", startRow = 12, colNames = FALSE )[,1:16]
+filename <- "Data Gathering Sheet 2015 V2.xlsx"
+statkraft_powerplant <- powerplant(filename)
+statkraft_genspec <- gen_spec(filename)
+statkraft_damspec <- dam_spec(filename)
+statkraft_gatesspec <- gates_spec(filename)
+statkraft_valvesspec <- valves_spec(filename)
 
-names(gen_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part B - Spec. generator", startRow = 8, rows = 8:9)[,2:17]%>% names
+stat_names <- c("statkraft_powerplant", "statkraft_genspec", "statkraft_damspec", "statkraft_gatesspec", "statkraft_valvesspec")
 
+statkraft <- lapply(stat_names, function(n) eval(parse(text=n)))
+names(statkraft) <- stat_names
+
+write.xlsx(statkraft, file = "Statkraft.xlsx")
 
 ```
-
-
-```{r}
-dam_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part C - Spec. reservoir, EBI", startRow = 12, colNames = FALSE )[,2:11]
-
-names(dam_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,2:11]%>% names
-```
-
-
-```{r}
-gates_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part D - Spec. gates above gr", startRow = 12, colNames = FALSE )
-
-names(gates_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part D - Spec. gates above gr", startRow = 8, rows = 8:9)[,2:10]%>% names
-```
-
-
-```{r}
-valves_spec <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part E - Spec. valves", startRow = 12, colNames = FALSE )
-
-names(valves_spec) <- read.xlsx("Data Gathering Sheet 2015 V2.xlsx", sheet = "T part E - Spec. valves", startRow = 8, rows = 8:9)[,2:6]%>% names
-```
-
