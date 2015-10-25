@@ -21,8 +21,8 @@ powerplant.Station_above_ground_ = categorical(powerplant.Station_above_ground_)
 %% damspec
 filename = 'statkraft_damspec.csv';
 damspec = readtable(filename,  'TreatAsEmpty', {'NA', '', ' '});
-damspec.Object_ID = categorical(damspec.Object_ID)
-damspec.Dam_or_River_stream_intake__EBI__ = categorical(damspec.Dam_or_River_stream_intake__EBI__)
+damspec.Object_ID = categorical(damspec.Object_ID);
+damspec.Dam_or_River_stream_intake__EBI__ = categorical(damspec.Dam_or_River_stream_intake__EBI__);
 
 %% gatesspec  column problem
 filename = 'statkraft_gatespec.csv';

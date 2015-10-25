@@ -26,40 +26,51 @@ setwd(file.loc)
 extraction functions
 ```{r}
 
-powerplant <- function(filename) {
+powerplant <- function(filename, company) {
   power_plant_level <- read.xlsx(filename, sheet = "T Part A - Power plant level", startRow = 12, colNames = FALSE )
   
-  names(power_plant_level) <- read.xlsx(filename, sheet = "T Part A - Power plant level" , startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% names  %>% sub("/", "",.)
- names(power_plant_level[9]) <- "StorageRoR" ##why doesnt this work?
+  names(power_plant_level) <- read.xlsx(filename, sheet = "T Part A - Power plant level" ,
+                                        startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% 
+    names  %>% sub("/", "",.)
+ power_plant_level <- rename(power_plant_level, StorageorRoR = `Storage..Run-of-river.plant`) 
+ power_plant_level$Station.ID <- paste(company, power_plant_level$Station.ID, sep = "" )
+ names(power_plant_level) <- sub("\\?","", names(power_plant_level))
   power_plant_level 
 }
 
-gen_spec <- function(filename){
+gen_spec <- function(filename, company){
 gen_spec <- read.xlsx(filename, sheet = "T part B - Spec. generator" , startRow = 12, colNames = FALSE )[,1:16]
 
 names(gen_spec) <- read.xlsx(filename, sheet = "T part B - Spec. generator" , startRow = 8, rows = 8:9)[,2:17]%>% names
+gen_spec$Station.ID <- paste(company, gen_spec$Station.ID, sep = "" )
 gen_spec
 
 }
 
-dam_spec <- function(filename) {
+dam_spec <- function(filename, company) {
   dam_spec <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 12, colNames = FALSE )[,2:11]
 
 names(dam_spec) <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,2:11]%>% names
+dam_spec$Station.ID <- paste(company, dam_spec$Station.ID, sep = "" )
 dam_spec
 }
 
-gates_spec <- function(filename) {
+gates_spec <- function(filename, company) {
 gates_spec <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 12, colNames = FALSE )
 
-names(gates_spec) <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 8, rows = 8:9)[,2:10]%>% names %>% sub("/", "",.)
+names(gates_spec) <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", 
+                               startRow = 8, rows = 8:9)[,2:10]%>% names %>% sub("/", "",.)
+gates_spec$Station.ID <- paste(company, gates_spec$Station.ID, sep = "" )
+names(gates_spec) <- sub("\\?","", names(gates_spec))
+gates_spec$Object.ID <- gates_spec$Object.ID[sub(",", "", gates_spec$Object.ID)] # commas were causing problems with the csv import, even though they were strings.
 gates_spec
 }
 
-valves_spec <- function(filename) {
+valves_spec <- function(filename, company) {
   valves_spec <- read.xlsx(filename, sheet = "T part E - Spec. valves", startRow = 12, colNames = FALSE )
 
 names(valves_spec) <- read.xlsx(filename, sheet = "T part E - Spec. valves", startRow = 8, rows = 8:9)[,2:6]%>% names
+valves_spec$Station.ID <- paste(company, valves_spec$Station.ID, sep = "" )
 valves_spec
 }
 
@@ -68,22 +79,23 @@ valves_spec
 Statkraft files
 ```{r}
 filename <- "Data Gathering Sheet 2015 V2.xlsx"
-statkraft_powerplant <- powerplant(filename)
-statkraft_genspec <- gen_spec(filename)
-statkraft_damspec <- dam_spec(filename)
-statkraft_gatespec <- gates_spec(filename)
-statkraft_valvespec <- valves_spec(filename)
+company <- "Statkraft"
+statkraft_powerplant <- powerplant(filename, company)
+statkraft_genspec <- gen_spec(filename, company)
+statkraft_damspec <- dam_spec(filename, company)
+statkraft_gatespec <- gates_spec(filename, company)
+statkraft_valvespec <- valves_spec(filename, company)
 
 stat_names <- c("statkraft_powerplant", "statkraft_genspec", "statkraft_damspec", "statkraft_gatespec", "statkraft_valvespec")
 
-statkraft <- lapply(stat_names, function(n) eval(parse(text=n)))
-names(statkraft) <- stat_names
+statkraft_gatespec$Object.ID[grepl(",", statkraft_gatespec$Object.ID)]
 
 lapply(stat_names, function(n) write.csv(eval(parse(text=n)), 
                                          paste(n, ".csv", sep=""), 
                                          row.names = FALSE)
        )
-
+#statkraft <- lapply(stat_names, function(n) eval(parse(text=n)))
+#names(statkraft) <- stat_names
 #write.xlsx(statkraft, file = "Statkraft.xlsx")
 
 #write.xlsx(statkraft_powerplant, file = "power.xlsx")
