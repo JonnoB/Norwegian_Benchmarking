@@ -74,6 +74,14 @@ valves_spec$Station.ID <- paste(company, valves_spec$Station.ID, sep = "" )
 valves_spec
 }
 
+rollup <- function(dataframe){
+        dataframe %>% 
+              group_by(Station.ID) %>% 
+              mutate(count = n()) %>% 
+              summarise_each_(funs(mean, max, min, sum, var), 
+                  names(.)[sapply(., class)=="numeric"|sapply(., class)=="integer"])
+}
+
 ```
 
 Statkraft files
@@ -88,16 +96,29 @@ statkraft_valvespec <- valves_spec(filename, company)
 
 stat_names <- c("statkraft_powerplant", "statkraft_genspec", "statkraft_damspec", "statkraft_gatespec", "statkraft_valvespec")
 
-statkraft_gatespec$Object.ID[grepl(",", statkraft_gatespec$Object.ID)]
+test2 <- statkraft_gatespec %>% count(Station.ID, SectorRadial.gate ) %>% ungroup %>% 
+          group_by(Station.ID) %>%  mutate(percSectorRadgate = n/sum(n)) %>%
+          filter(SectorRadial.gate == "N")
 
-lapply(stat_names, function(n) write.csv(eval(parse(text=n)), 
-                                         paste(n, ".csv", sep=""), 
-                                         row.names = FALSE)
-       )
-#statkraft <- lapply(stat_names, function(n) eval(parse(text=n)))
-#names(statkraft) <- stat_names
-#write.xlsx(statkraft, file = "Statkraft.xlsx")
 
-#write.xlsx(statkraft_powerplant, file = "power.xlsx")
+valvetest <- rollup(statkraft_valvespec)
+gatetest <- rollup(statkraft_gatespec)
+
+# lapply(stat_names, function(n) write.csv(eval(parse(text=n)), 
+#                                          paste(n, ".csv", sep=""), 
+#                                          row.names = FALSE)
+
+
+test <- statkraft_gatespec %>% select_(.,Station.ID,names(.)[sapply(., class)=="catagorical"])
+
+mydata <- data.frame(movie = c("Titanic", "Departed"), 
+actor1 = c("Leo", "Jack"), 
+ actor2 = c("Kate", "Leo"))
+
+mydata %>%
+  gather(actor,name,starts_with("actor")) %>%
+  mutate(present = 1) %>%
+  #select(-actor) %>%
+  spread(name,present,fill = 0)
 
 ```
