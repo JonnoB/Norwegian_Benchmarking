@@ -31,27 +31,37 @@ powerplant <- function(filename, company) {
   
   names(power_plant_level) <- read.xlsx(filename, sheet = "T Part A - Power plant level" ,
                                         startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% 
-    names  %>% sub("/", "",.)
+    names  %>% sub("/|\\-", "",.)
  power_plant_level <- rename(power_plant_level, StorageorRoR = `Storage..Run-of-river.plant`) 
  power_plant_level$Station.ID <- paste(company, power_plant_level$Station.ID, sep = "" )
- names(power_plant_level) <- sub("\\?","", names(power_plant_level))
+ names(power_plant_level) <- gsub("\\?","", names(power_plant_level))
   power_plant_level 
 }
 
 gen_spec <- function(filename, company){
 gen_spec <- read.xlsx(filename, sheet = "T part B - Spec. generator" , startRow = 12, colNames = FALSE )[,1:16]
 
-names(gen_spec) <- read.xlsx(filename, sheet = "T part B - Spec. generator" , startRow = 8, rows = 8:9)[,2:17]%>% names
+names(gen_spec) <-  read.xlsx(filename, sheet = "T part B - Spec. generator" , 
+                             startRow = 8, rows = 8:9)[,2:17]%>% 
+                    names %>% gsub("\\?|\\/|\\(|\\)", "",.) #the ? are being read as Regex and so are removed from the headings, they could be escaed but are superflous anyway.
 gen_spec$Station.ID <- paste(company, gen_spec$Station.ID, sep = "" )
+catag <-c("Turbine.type","Reversible.pump.turbine","Turbine.with.2.or.more.runners","Water.cooled.windings")
+gen_spec %<>%mutate_each_(funs(factor),catag) %>% 
+          group_by(Station.ID) %>% 
+          mutate(specID = 1, specID = paste(Station.ID,"_",cumsum(specID),sep="")) %>% ungroup
 gen_spec
-
 }
 
 dam_spec <- function(filename, company) {
   dam_spec <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 12, colNames = FALSE )[,2:11]
 
-names(dam_spec) <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,2:11]%>% names
+names(dam_spec) <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,2:11]%>% names %>% gsub("\\?|\\/|\\(|\\)", "",.) #the ? are being read as Regex and so are removed from the headings, they could be escaed but are superflous anyway.
 dam_spec$Station.ID <- paste(company, dam_spec$Station.ID, sep = "" )
+names(dam_spec)[6] <- "Distance.from.roads"
+catag <- c("Object.ID","Dam.or.Riverstream.intake.EBI","Altitude.above.sea.level"  ,"Climate.zone" ,"Dam.classification")
+dam_spec %<>% mutate_each_(funs(factor),catag) %>% 
+          group_by(Station.ID) %>% 
+          mutate(specID = 1, specID = paste(Station.ID,"_",cumsum(specID),sep="")) %>% ungroup
 dam_spec
 }
 
@@ -59,18 +69,26 @@ gates_spec <- function(filename, company) {
 gates_spec <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 12, colNames = FALSE )
 
 names(gates_spec) <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", 
-                               startRow = 8, rows = 8:9)[,2:10]%>% names %>% sub("/", "",.)
+                               startRow = 8, rows = 8:9)[,2:10]%>% names %>% gsub("\\?|\\/", "",.)
 gates_spec$Station.ID <- paste(company, gates_spec$Station.ID, sep = "" )
-names(gates_spec) <- sub("\\?","", names(gates_spec))
+#names(gates_spec) <- gsub("\\?","", names(gates_spec))
 gates_spec$Object.ID <- gates_spec$Object.ID[sub(",", "", gates_spec$Object.ID)] # commas were causing problems with the csv import, even though they were strings.
+catag <- c("SectorRadial.gate","Flood.gate")
+gates_spec %<>% mutate_each_(funs(factor),catag) %>% 
+          group_by(Station.ID) %>% 
+          mutate(specID = 1, specID = paste(Station.ID,"_",cumsum(specID),sep="")) %>% ungroup
 gates_spec
 }
 
 valves_spec <- function(filename, company) {
   valves_spec <- read.xlsx(filename, sheet = "T part E - Spec. valves", startRow = 12, colNames = FALSE )
 
-names(valves_spec) <- read.xlsx(filename, sheet = "T part E - Spec. valves", startRow = 8, rows = 8:9)[,2:6]%>% names
+names(valves_spec) <- read.xlsx(filename, sheet = "T part E - Spec. valves", startRow = 8, rows = 8:9)[,2:6]%>% names %>% gsub("\\?", "",.) #the ? are being read as Regex and so are removed from the headings, they could be escaed but are superflous anyway.
 valves_spec$Station.ID <- paste(company, valves_spec$Station.ID, sep = "" )
+# valves does not have any catagorical values to rollup
+valves_spec %<>%  group_by(Station.ID) %>% 
+                  mutate(specID = 1, specID = paste(Station.ID,"_",cumsum(specID),sep="")) %>%
+                  ungroup
 valves_spec
 }
 
@@ -82,43 +100,54 @@ rollup <- function(dataframe){
                   names(.)[sapply(., class)=="numeric"|sapply(., class)=="integer"])
 }
 
+catagoricals <- function(data) {
+data <-  data %>% select(1,length(.),which(sapply(., class)=="factor"))
+
+#split out catagorical values and replace rogue J's with Y remove NA values
+data2 <- data %>% gather(variable, class, -c(Station.ID,specID))
+data2$class <- sub("^J$", "Y", data2$class)
+data2 %<>%  mutate(present = 1, variable = paste(variable, "_",class, sep="")) %>%
+            select(-class) %>% 
+            spread(variable, present, fill = 0) %>% select(-specID)
+
+#remove NA columns
+data2 %<>% select(-ends_with("_NA"))
+
+##Aggregate up all the values into a single powerplant
+data2 %<>% group_by(Station.ID) %>% summarise_each(funs(sum))
+}
+
+aggregator <- function(data) {
+  if (length(which(sapply(data, class)=="factor"))!=0){  
+  rolled <- rollup(data)
+  catag <- catagoricals(data)
+  data <- full_join(rolled, catag, by = "Station.ID")
+  } else {data <- rollup(data)}
+    data
+}
+
+combinatron <- function(filename, comapany){
+powerplant <- powerplant(filename, company) %>% aggregator
+genspec <- gen_spec(filename, company) %>% aggregator
+damspec <- dam_spec(filename, company) %>% aggregator
+gatespec <- gates_spec(filename, company) %>% aggregator
+valvespec <- valves_spec(filename, company) %>% aggregator
+powerplant %<>% full_join(., genspec ,by="Station.ID") %>% 
+                full_join(., damspec ,by="Station.ID") %>%
+                full_join(., gatespec ,by="Station.ID") %>%
+                full_join(.,valvespec,by="Station.ID")
+powerplant
+}
+
 ```
 
 Statkraft files
 ```{r}
 filename <- "Data Gathering Sheet 2015 V2.xlsx"
 company <- "Statkraft"
-statkraft_powerplant <- powerplant(filename, company)
-statkraft_genspec <- gen_spec(filename, company)
-statkraft_damspec <- dam_spec(filename, company)
-statkraft_gatespec <- gates_spec(filename, company)
-statkraft_valvespec <- valves_spec(filename, company)
 
 stat_names <- c("statkraft_powerplant", "statkraft_genspec", "statkraft_damspec", "statkraft_gatespec", "statkraft_valvespec")
 
-test2 <- statkraft_gatespec %>% count(Station.ID, SectorRadial.gate ) %>% ungroup %>% 
-          group_by(Station.ID) %>%  mutate(percSectorRadgate = n/sum(n)) %>%
-          filter(SectorRadial.gate == "N")
-
-
-valvetest <- rollup(statkraft_valvespec)
-gatetest <- rollup(statkraft_gatespec)
-
-# lapply(stat_names, function(n) write.csv(eval(parse(text=n)), 
-#                                          paste(n, ".csv", sep=""), 
-#                                          row.names = FALSE)
-
-
-test <- statkraft_gatespec %>% select_(.,Station.ID,names(.)[sapply(., class)=="catagorical"])
-
-mydata <- data.frame(movie = c("Titanic", "Departed"), 
-actor1 = c("Leo", "Jack"), 
- actor2 = c("Kate", "Leo"))
-
-mydata %>%
-  gather(actor,name,starts_with("actor")) %>%
-  mutate(present = 1) %>%
-  #select(-actor) %>%
-  spread(name,present,fill = 0)
+triplex <- combinatron(filename, company)
 
 ```
