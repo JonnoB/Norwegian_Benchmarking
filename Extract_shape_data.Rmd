@@ -149,7 +149,7 @@ plantspec
 
 ```
 
-Statkraft files
+Load and combine files
 ```{r}
 filename <- "Data Gathering Sheet 2015 V2.xlsx"
 company <- "Statkraft"
@@ -185,6 +185,33 @@ test %<>%  mutate_each(funs(numeric),names(.)[sapply(., class)=="integer"])
 cortest <-cor(test[,-1])
 hc = findCorrelation(cortest, cutoff=0.8)
 names(.)[sapply(., class)=="numeric"|sapply(., class)=="integer"]
+```
+
+
+Remove empty variables or nearly empty variables
+```{r}
+
+```
+
+
+Remove Highly correlated variables
+```{r}
+
+```
+
+Add Cost and WMO data
+```{r}
+
+```
+
+Model WMO accuracy
+```{r}
+
+```
+
+Create variety of statistical models
+```{r}
+
 ```
 
 
