@@ -190,21 +190,20 @@ names(.)[sapply(., class)=="numeric"|sapply(., class)=="integer"]
 merge in costs
 ```{r}
 company2= "Eidsiva"
-eidscostfile <- "Kostnadsanalyser Statkraft, Eidsiva-data 2009-2014 (FBi_06-11-2015).xlsx"
+eidscostfile <-"Eidsiva cost 2.xlsx" #"Kostnadsanalyser Statkraft, Eidsiva-data 2009-2014 (FBi_06-11-2015).xlsx"
+# "Eidsiva cost2.xlsx" 
 
-costjoiner <- function(company, costfile){
-  cost <-read.xlsx(costfile, startRow=5)[,c(5,33:38)]
-  cost %<>% rename(Station.ID= X5) %>%filter(!is.na(Station.ID))
-  cost$Station.ID <- paste(company, cost$Station.ID, sep = "" )
-names(cost)[2:7] <- paste("year_",names(cost)[2:7], sep="")
-cost %<>% mutate(yr2014avg= (year_2014+year_2013+year_2012)/4) %>%select(Station.ID, yr2014avg)
-
+costjoiner2 <- function(company, costfile){
+  cost <-read.xlsx(costfile)
+  cost %<>% filter(!is.na(Station.ID)) %>%mutate(Station.ID =paste(company, cost$Station.ID, sep = "" ))
 }
 
-eidscost <-costjoiner(company2, eidscostfile)
+eidscost <-costjoiner2("Eidsiva", "Eidsiva cost2.xlsx")
 ecocost <- costjoiner("eco","E-CO Energi Rapporteringsskjema 2010 - 2014.xlsx")
 x <-read.xlsx("E-CO Energi Rapporteringsskjema 2010 - 2014.xlsx")
-x2 <-read.xlsx("E-CO Energi Rapporteringsskjema 2010 - 2014.xlsx", startRow=5)[,c(5,33:38)]
+x2 <-read.xlsx("ECO cost2.xlsx", startRow=5)[,c(5,33:38)]
+#"E-CO Energi Rapporteringsskjema 2010 - 2014.xlsx"
+#"ECO cost2.xlsx"
 
 ```
 
