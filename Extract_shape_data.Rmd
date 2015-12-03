@@ -15,7 +15,7 @@ Load packages
 packages <- c("dplyr", "tidyr", "magrittr", "openxlsx", "caret")
 
 lapply(packages, library, character.only = TRUE)
-
+select <- dplyr::select %Clash between dplyr and MASS which is loaded bby Caret
 
 file.loc <-file.path("~","Benchmarking", "PA consulting", "2015", "Statkraft") #file location may be computer specific depending on network
 setwd(file.loc)
@@ -164,28 +164,21 @@ eidsiva <- combinatron("Eidsiva 2013 DD1 (31.04.2014).xlsx","Eidsiva")
 filename2 <- "Eidsiva 2013 DD1 (31.04.2014).xlsx"
 company2 <- "Eidsiva"
 
-plant_spec <- powerplant(filename, company) %>%aggregator
-genspec <- gen_spec(filename, company) %>%aggregator
-damspec <- dam_spec(filename, company)%>%aggregator
-gatespec <- gates_spec(filename, company) %>%aggregator
-valvespec <- valves_spec(filename, company)%>%aggregator
-
-#filename <- filename2
-#company <- company2
-plant_spec2 <- powerplant(filename2, company2) %>%aggregator
-genspec2 <- gen_spec(filename2, company2)%>%aggregator
-damspec2 <- dam_spec(filename2, company2) %>%aggregator
-gatespec2 <- gates_spec(filename2, company2)  %>%aggregator
-valvespec2 <- valves_spec(filename2, company2)  %>%aggregator
-
-test <- bind_rows(triplex, eidsiva, eco) #
-test[is.na(test)] <- 0
-test %<>%  mutate_each(funs(numeric),names(.)[sapply(., class)=="integer"])
-
-cortest <-cor(test[,-1])
-hc = findCorrelation(cortest, cutoff=0.8)
-names(.)[sapply(., class)=="numeric"|sapply(., class)=="integer"]
+techdata <- bind_rows(triplex, eidsiva, eco) #
+techdata[is.na(techdata)] <- 0
+techdata %<>%  mutate_each(funs(numeric),names(.)[sapply(., class)=="integer"])
 ```
+
+
+```{r}
+#Remove all zero variance and highly correlated variables to reduce the total number of variables and reduce the risk of multicolinearity.
+remove <- nearZeroVar(x[,-1])+1
+techdata <-  techdata[,-remove]
+cortest <-cor(techdata[,-1])
+hc = findCorrelation(cortest, cutoff=0.9)+1
+techdata <- techdata[,-hc]
+```
+
 
 merge in costs
 ```{r}
@@ -194,17 +187,16 @@ eidscostfile <-"Eidsiva cost 2.xlsx" #"Kostnadsanalyser Statkraft, Eidsiva-data 
 # "Eidsiva cost2.xlsx" 
 
 costjoiner2 <- function(company, costfile){
-  cost <-read.xlsx(costfile)
+  cost <-read.xlsx(costfile)[,c(4,7:12)]
   cost %<>% filter(!is.na(Station.ID)) %>%mutate(Station.ID =paste(company, cost$Station.ID, sep = "" ))
 }
 
 eidscost <-costjoiner2("Eidsiva", "Eidsiva cost2.xlsx")
-ecocost <- costjoiner("eco","E-CO Energi Rapporteringsskjema 2010 - 2014.xlsx")
-x <-read.xlsx("E-CO Energi Rapporteringsskjema 2010 - 2014.xlsx")
-x2 <-read.xlsx("ECO cost2.xlsx", startRow=5)[,c(5,33:38)]
-#"E-CO Energi Rapporteringsskjema 2010 - 2014.xlsx"
-#"ECO cost2.xlsx"
+ecocost <- costjoiner2("ECO","ECO cost2.xlsx")
+statkraftcost <- costjoiner2("Statkraft","Statkraft cost.xlsx")
+costdata <- bind_rows(eidscost,ecocost, statkraftcost) %>% gather(key = year, value= cost,-Station.ID) %>% group_by(Station.ID) %>% summarise(mean_3yr_2014 = mean(cost)) %>%filter(!is.na(Station.ID),!is.na(mean_3yr_2014))
 
+data <- inner_join(techdata, costdata, "Station.ID")
 ```
 
 Remove empty variables or nearly empty variables
@@ -220,7 +212,12 @@ Remove Highly correlated variables
 
 Add Cost and WMO data
 ```{r}
+data <- inner_join(x, costdata, "Station.ID")
 
+x <-train(mean_3yr_2014 ~ ., data[,-1], method = "lm")
+x2 <-train(mean_3yr_2014 ~ ., data[,-1], method = "lmStepAIC")
+x3 <- train(mean_3yr_2014 ~,data = data[,-1], method="lm")
+test <- select(data, contains("a"))
 ```
 
 Model WMO accuracy
