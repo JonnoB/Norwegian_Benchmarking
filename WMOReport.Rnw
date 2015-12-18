@@ -164,6 +164,12 @@ res <- mutate(res, diff = costs - Prediction, percentage_error = diff/costs)
 
 
 negatives <- res %>% filter(Prediction<0)
+
+toterr <- res %>% group_by(model) %>% summarise(meanerr = mean(abs(diff)))
+toterr <- mutate(toterr, meanerr= meanerr-meanerr[1])
+toterr$model <- as.factor(toterr$model)
+toterr$model <-factor(toterr$model,levels(toterr$model)[c(4,6,1,3,2,5)])
+
 @
 
 
@@ -184,7 +190,7 @@ negatives <- res %>% filter(Prediction<0)
 \newpage
 
 \abstract
-The WMO is currently used to benchmark Nordic Hydro-power companies. This analysis explores how effectively the WMO performs when compared to statistical models. The findings show that the WMO is consistently the worst performer across all metrics. An alternative model is proposed which reduces the RMSE by \Sexpr{perf}\% for the linear case and \Sexpr{perfRF}\% for the nonlinear one. The conclusion is that the WMO should be replaced by a statistical model that would be both easier to understand and more accurate. But that expert knowledge is required optimise the model.
+The WMO is currently used to benchmark Nordic Hydro-power companies. This analysis explores how effectively the WMO performs when compared to statistical models. The findings show that the WMO is consistently the worst performer across all metrics. An alternative model is proposed which reduces the RMSE by \Sexpr{perf}\% for the linear case and \Sexpr{perfRF}\% for the nonlinear one. In addition average error per plant was decreased by upto 1 million NOK per year using the Random Forest method.  The conclusion is that the WMO should be replaced by a statistical model that would be both easier to understand and more accurate. But that expert knowledge is required optimise the model.
 
  \begin{center}
 \section*{Acknowledgments} 
@@ -220,7 +226,7 @@ The structure of the submission documents used for the WMO process is such that 
   
 \subsection {Modelling}
 
-Modelling was performed mostly using the caret package in r \cite{Kuhn2015} and following the concepts described by Kuhn and Johnson in their book "Applied Predictive Modelling"\cite{Kuhn2013}. The linear models were used due to their ease of interpretation there were four such models fitted, In addition two nonlinear methods were also evaluated, these models can be harder to interpret but can also give very strong performance if the data is nonlinear.
+Modelling was performed mostly using the caret package in r \cite{Kuhn2015} and following the concepts described by Kuhn and Johnson in their book "Applied Predictive Modelling"\cite{Kuhn2013}. The coefficients were tuned using 10 fold cross validation. The linear models were used due to their ease of interpretation there were four such models fitted, In addition two nonlinear methods were also evaluated, these models can be harder to interpret but can also give very strong performance if the data is nonlinear.
   \begin{itemize}
   \item Base Regression: A multilinear model made up of all variables
   \item Reduced Regression: A multilinear model made up of a subset of variables chosen through stepwise backwards regression optimising the AIC, the algorithm uses the MASS package\cite{Venables2002}.
@@ -240,7 +246,7 @@ As the purpose of the WMO is to measure the complexity of a power plant on the a
 
 \subsection{comparing between models}  
 
-  The results of the model generation process are shown in table \ref{tab:comp}, It is clear that the WMO is out performed by every model across all metrics. Accounting for the number of variable included the adjusted $R^2$ of the Reduced variable model shows it to be the best performing of the models reducing the error of the WMO model by  \Sexpr{perf}\%.  The results shown in table \ref{tab:comp} are only for in sample data, the RMSE on out of sample data will generally be lower. The Random Forest and MARS Regressions do not have adjusted $R^2$ because they work in a different way and such a metric isn't relevant, however the RMSE is still a valid, and as is seen they are effective. 
+  The results of the model generation process are shown in table \ref{tab:comp}, It is clear that the WMO is out performed by every model across all metrics. Accounting for the number of variable included the adjusted $R^2$ of the Reduced variable model shows it to be the best performing of the models reducing the error of the WMO model by  \Sexpr{perf}\%.  The results shown in table \ref{tab:comp} are only for in sample data, the RMSE on out of sample data will generally be lower. The Random Forest and MARS Regressions do not have adjusted $R^2$ because they work in a different way and such a metric isn't relevant, however the RMSE is still a valid, and as is seen they are effective. Figure \ref{fig:plantdiff} shows the expected average error difference per plant per year relative to the WMO. The WMO actually out performs the two weakests models but is out performed by both multilinear models and greatly outperformed by the Random forest. The maximum difference between WMO and the other models is over 1 Million Kroner per plant per year for the random forest and 200K for the Reduced Multilienar model. By adding nonlinear terms into the multilinear model such as squared terms or interaction the difference would be improved as the reduced model woud be given more flexibiity to adapt to situations such as diminishing cost increases as MW increases.
 
 \subsection{Results of special interest}
 
@@ -362,11 +368,25 @@ label = "tab:comp"),type="latex")
   \label{compare}
   \end{figure}
   
+\begin{figure}[h]
+\begin{center}
+<<>>=
 
+ggplot(toterr, aes(x=model, y = meanerr)) +geom_bar(stat = "identity") +
+  ggtitle("Error difference per power plant relative to\n the WMO in KNOK per year") +
+ylab("Mean Error per plant per year")+
+  xlab("Model")
+
+@
+\end{center}
+\caption{The difference in expected error between the different model types. Although they out perform THE WMO in other metrics the MW and MARS models do not perform better with average relative loss. However the RF model results in a decrease in error per plant of over 1 million kroner per year. Using non-linear terms and interaction in the Reduced Regression would improve performance to 500KNOK or more in difference.}
+\label{fig:plantdiff}
+\end{figure}
+  
 
 \section{Conclusion}
 
-The results of this Analysis have shown that the WMO has no statistical performance advantages over any other model option tested being outperformed across across all metrics, even being outperformed by the simple Mw regression. The difference between the performance of the WMO and reduced regression is large \Sexpr{perf}\% smaller RMSE as well as much greater adjusted $R^2$, the difference with the non linear model is \Sexpr{perfRF}\%. 
+The results of this Analysis have shown that the WMO has no statistical performance advantages over any other model option tested being outperformed across across all metrics, even being outperformed by the simple Mw regression. The difference between the performance of the WMO and reduced regression is large \Sexpr{perf}\% smaller RMSE as well as much greater adjusted $R^2$, the difference with the non linear model is \Sexpr{perfRF}\%. The difference of average error per plant of upto 1 Million Nok per year, show that improving the mode can result in better revenue streams. 
 
 However there is definitely room for improvement, the method of variable selection and feature generation used in this analysis, whilst effective, needs to be guided by experts in order to help remove model weaknesses, in his "Super Crunchers" Ian Ayers says "in the end, [statistical modelling] is not a substitute for intuition, but rather a complement" \cite{Ayres2007}
 and that can be seen in the problems shown by the models used in this report. This discussion process of selecting variables and considering interaction is already done effectively in the WMO framework and that process could be combined with the statistical methods shown here to improve model results.
