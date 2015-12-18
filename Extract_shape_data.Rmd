@@ -2,7 +2,7 @@
 title: "Open and clean WMO data"
 author: "Jonathan Bourne"
 date: "11. oktober 2015"
-output: html_document
+output: pdf_document
 ---
 
 This document will contain the code that can be used to open and the WMO files and extract the data
@@ -12,13 +12,15 @@ summaries to take mean, varience total number
 Load packages
 ```{r}
 
-packages <- c("dplyr", "tidyr", "magrittr", "openxlsx", "caret")
+packages <- c("dplyr", "tidyr", "magrittr", "openxlsx", "knitr", "caret")
 
 lapply(packages, library, character.only = TRUE)
-select <- dplyr::select %Clash between dplyr and MASS which is loaded bby Caret
+select <- dplyr::select #Clash between dplyr and MASS which is loaded bby Caret
 
 file.loc <-file.path("~","Benchmarking", "PA consulting", "2015", "Statkraft") #file location may be computer specific depending on network
 setwd(file.loc)
+opts_knit$set(root.dir = "C:/Users/Jonno/Documents/Benchmarking/PA consulting/2015/Statkraft")
+opts_chunk$get("root.dir")
 ```
 
 #Extract relevant sheets as data frames
@@ -55,20 +57,23 @@ gen_spec
 }
 
 dam_spec <- function(filename, company) {
-    dam_spec <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 12, colNames = FALSE )[,2:11]
+    dam_spec <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 12, colNames = FALSE )[,c(2,5:10)]
 
-    names(dam_spec) <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,2:11]%>% 
+    names(dam_spec) <- read.xlsx(filename, sheet = "T part C - Spec. reservoir, EBI", startRow = 8, rows = 8:9)[,c(2,6:11)]%>% 
       names %>% gsub("\\?|\\/|\\(|\\)", "",.) #the ? are being read as Regex and so are removed from the headings, they could be escaed but are superflous anyway.
     dam_spec %<>% filter(!is.na(Station.ID))
     dam_spec$Station.ID <- paste(company, dam_spec$Station.ID, sep = "" )
-    names(dam_spec)[6] <- "Distance.from.roads"
-    catag <- c("Object.ID","Dam.or.Riverstream.intake.EBI","Altitude.above.sea.level"  ,"Climate.zone" ,"Dam.classification")
+    names(dam_spec)[3] <- "Distance_from_roads_geq1"
+    catag <- c("Dam.or.Riverstream.intake.EBI","Distance_from_roads_geq1"   ,"Climate.zone" ,"Dam.classification")
     dam_spec %<>% mutate_each_(funs(factor),catag) %>% 
           group_by(Station.ID) %>% 
           mutate(specID = 1, specID = paste(Station.ID,"_",cumsum(specID),sep="")) %>% 
           ungroup 
 dam_spec
 }
+
+ company <- "Statkraft"
+ filename <- "Data Gathering Sheet 2015 V2.xlsx"
 
 gates_spec <- function(filename, company) {
       gates_spec <- read.xlsx(filename, sheet = "T part D - Spec. gates above gr", startRow = 12, colNames = FALSE )[,1:9]
@@ -126,16 +131,16 @@ data2 %<>% group_by(Station.ID) %>% summarise_each(funs(sum))
 }
 
 aggregator <- function(data) {
-  if (length(which(sapply(data, class)=="factor"))!=0){  
-  rolled <- rollup(data)
-  catag <- catagoricals(data)
-  data <- full_join(rolled, catag, by = "Station.ID")
+    if (length(which(sapply(data, class)=="factor"))!=0){  
+        rolled <- rollup(data)
+        catag <- catagoricals(data)
+        data <- full_join(rolled, catag, by = "Station.ID")
   } else {data <- rollup(data)}
     data
 }
 
 combinatron <- function(filename, comapanyname){
-plantspec <- powerplant(filename, comapanyname) %>% aggregator
+plantspec <- powerplant(filename, comapanyname) #%>% aggregator
 genspec <- gen_spec(filename, comapanyname) %>% aggregator
 damspec <- dam_spec(filename, comapanyname) %>% aggregator
 gatespec <- gates_spec(filename, comapanyname) %>% aggregator
@@ -147,128 +152,98 @@ plantspec %<>% full_join(., genspec ,by="Station.ID") %>%
 plantspec
 }
 
+
+costjoiner2 <- function(company, costfile){
+  cost <-read.xlsx(costfile)[,-c(1:3,5:6)] 
+  cost %<>% filter(!is.na(Station.ID)) %>%mutate(Station.ID =paste(company, cost$Station.ID, sep = "" ))
+}
+
 ```
 
-Load and combine files
 ```{r}
-filename <- "Data Gathering Sheet 2015 V2.xlsx"
-company <- "Statkraft"
-triplex <- combinatron(filename, company)
+#Load and combine files
+Statkraft<- combinatron("Data Gathering Sheet 2015 V2.xlsx","Statkraft" )
+ECO <- combinatron("ECO 2014.xlsx", "ECO")
+Eidsiva <- combinatron("Eidsiva 2013 DD1 (31.04.2014).xlsx","Eidsiva")
 
-
-stat_names <- c("statkraft_powerplant", "statkraft_genspec", "statkraft_damspec", "statkraft_gatespec", "statkraft_valvespec")
-
-eco <- combinatron("ECO 2014.xlsx", "ECO")
-
-eidsiva <- combinatron("Eidsiva 2013 DD1 (31.04.2014).xlsx","Eidsiva")
-filename2 <- "Eidsiva 2013 DD1 (31.04.2014).xlsx"
-company2 <- "Eidsiva"
-
-techdata <- bind_rows(triplex, eidsiva, eco) #
-techdata[is.na(techdata)] <- 0
-techdata %<>%  mutate_each(funs(numeric),names(.)[sapply(., class)=="integer"])
+# eidsdam <-dam_spec("Eidsiva 2013 DD1 (31.04.2014).xlsx","Eidsiva")
+# company <- "Eidsiva"
+# filename <- "Eidsiva 2013 DD1 (31.04.2014).xlsx"
+# company <- "Statkraft"
+# filename <- "Data Gathering Sheet 2015 V2.xlsx"
 ```
+
+```{r}
+#Additional variable removal
+techdata <- bind_rows(Statkraft, ECO, Eidsiva) 
+techdata[is.na(techdata)] <- 0
+techdata %<>% select( 
+       -contains("Number.of.StartStop"),
+       -Altitude.above.sea.level_sum,
+       -Hydraulic.Head_sum, 
+       -Rotations.per.minute_sum,
+       -WMOInclusion,
+       -Air.compression.chamber,
+       -contains("Generator.number"),
+       -contains("count"),
+       -Water.cooled.windings_N,
+       -Reversible.pump.turbine_N,
+       - Distance_from_roads_geq1_N,
+       -Area,
+       -Sub.area,
+       -Catchment.area,
+       -X6) %>% 
+  mutate(Water.cooled.windings_Y= (Water.cooled.windings_Y >0),
+         Climate.zone_1= (Climate.zone_1 >0),
+         Climate.zone_2= (Climate.zone_2 >0),
+         Climate.zone_3= (Climate.zone_3 >0),
+         Reversible.pump.turbine_Y= (Reversible.pump.turbine_Y >0),
+         Distance_from_roads_geq1_Y= (Distance_from_roads_geq1_Y >0),
+         Storage..Runofriver.plant=Storage..Runofriver.plant=="R",
+         Station.above.ground =Station.above.ground=="Y")
+
+x <- techdata
+```
+
 
 
 ```{r}
 #Remove all zero variance and highly correlated variables to reduce the total number of variables and reduce the risk of multicolinearity.
-remove <- nearZeroVar(x[,-1])+1
+
+techdata %<>%  mutate_each(funs(numeric),names(.)[sapply(., class)=="integer"])
+remove <- nearZeroVar(techdata[,-1])+1
 techdata <-  techdata[,-remove]
-cortest <-cor(techdata[,-1])
-hc = findCorrelation(cortest, cutoff=0.9)+1
-techdata <- techdata[,-hc]
+technum <- sapply(techdata, class)=="numeric"
+techdatanum <- techdata[,technum]
+techdata <- techdata[,!technum] #the vector is logical
+cortest <-cor(techdatanum)
+hc = findCorrelation(cortest, cutoff=0.9)
+techdata <- cbind(techdata, techdatanum[,-hc])
+save(techdata,file ="techdata.R")
 ```
 
 
-merge in costs
-```{r}
-company2= "Eidsiva"
-eidscostfile <-"Eidsiva cost 2.xlsx" #"Kostnadsanalyser Statkraft, Eidsiva-data 2009-2014 (FBi_06-11-2015).xlsx"
-# "Eidsiva cost2.xlsx" 
 
-costjoiner2 <- function(company, costfile){
-  cost <-read.xlsx(costfile)[,c(4,7:12)]
-  cost %<>% filter(!is.na(Station.ID)) %>%mutate(Station.ID =paste(company, cost$Station.ID, sep = "" ))
-}
+```{r}
+#merge in costs
 
 eidscost <-costjoiner2("Eidsiva", "Eidsiva cost2.xlsx")
 ecocost <- costjoiner2("ECO","ECO cost2.xlsx")
 statkraftcost <- costjoiner2("Statkraft","Statkraft cost.xlsx")
-costdata <- bind_rows(eidscost,ecocost, statkraftcost) %>% gather(key = year, value= cost,-Station.ID) %>% group_by(Station.ID) %>% summarise(mean_3yr_2014 = mean(cost)) %>%filter(!is.na(Station.ID),!is.na(mean_3yr_2014))
+
+costdata <- bind_rows(eidscost,ecocost, statkraftcost) %>% select(-WMO_.Rehab,-WMO_Total,-YD_2009,-YD_2010,-YD_2011) %>% gather(key = year, value= cost,-c(Station.ID, WMO_DV)) %>% group_by(Station.ID) %>% summarise(mean_3yr_2014 = mean(cost),WMO_DV = mean(WMO_DV)) %>%filter(!is.na(Station.ID),!is.na(mean_3yr_2014))
 
 data <- inner_join(techdata, costdata, "Station.ID")
 ```
 
-Remove empty variables or nearly empty variables
 ```{r}
-
-```
-
-
-Remove Highly correlated variables
-```{r}
-
-```
-
-Add Cost and WMO data
-```{r}
-data <- inner_join(x, costdata, "Station.ID")
-
-x <-train(mean_3yr_2014 ~ ., data[,-1], method = "lm")
-x2 <-train(mean_3yr_2014 ~ ., data[,-1], method = "lmStepAIC")
-x3 <- train(mean_3yr_2014 ~,data = data[,-1], method="lm")
-test <- select(data, contains("a"))
-```
-
-Model WMO accuracy
-```{r}
-
-```
-
-Create variety of statistical models
-```{r}
+#remove start stops 
+data <- filter(data, !is.na(WMO_DV)) 
 
 ```
 
 
 ```{r}
-names(genspec2)[!(names(genspec2) %in% names(genspec))]
-names(plant_spec2)[!(names(plant_spec2) %in% names(plant_spec))]
-names(triplex)[!(names(eidsiva) %in% names(triplex))]
-
-x1 <- bind_rows(genspec, genspec2)
-x2 <- bind_rows(plant_spec, plant_spec2)
-x3 <- bind_rows(damspec2,damspec)
-x4 <- bind_rows(valvespec2,valvespec)
-x5 <- bind_rows(gatespec, gatespec2)
-
-x <- x1 %>% full_join(x2) %>% full_join(x3) %>% full_join(x4) %>% full_join(x5)
-
+#OutPut an R file of the tech data
+save(data, file = "WMOData.R")
 ```
-
-
-```{r}
-data1 <- data.frame(data1=runif(10),data2=runif(10),data4=runif(10))
-data2 <- data.frame(data1=runif(10),data3=runif(10),data5=runif(10))
-
-datatotal <- bind_rows(data1,data2)
-```
-
-
-\newpage
-
-#Abstract
-
-#Introdution
-The WMO has been used in Norway since the the early 2000's as a way of normalising costs between Power Plants of different physical characteristics. It is the defacto standard within Norway and has some use in other Countries within the Nordics. An area of difficulty within the WMO is that the concept of a Weighted Maintenance Object is entirely abstract having no real expression in measurable reality. In addition the way that the total WMO's per Power Plant is calculated is extremly convulated and a mathmatical definition of the model doesn't exist. This has made it very difficult to measure how effective the model is at capturing the varience between Power Plants. In order to understand the WMO it is necessary to understand its development.The model was developed by Statkraft, Norway's largest Power Company, together with PA consulting. At the time the model was developed Statkraft wasn't able to produce cost data down to the granularity of a Power Plant but to the level of a so called 'Power Plant Group'. A Power Plant Group are a collection of distinct Power Plants that share geographical proximity, they may also share hydrological resources.In order to get around this problem the Weighted Maintenance Object was invented.
-
-A WMO is a unit of maintenance complexity, the idea being that the number of WMO's is proportional to the amount of maintenance that a Power Plant needs and therefore the amount of money that is required to maintain it. It was beleived that by calculating the total Number of WMO's per Power Plant group and finding the ratio of WMO's to spend on maintenance it would then be possible to compare the cost effectiveness of different Power Plants or groups using this newly created metric. The method of creation of WMO's is partially statistical partially expert based. Work by Sintef **find ref** found a relationship between generator size, quantity and maintenance cost, and this work was used to create part of the system which accounts for approximately 60% of the total amount of WMO's across the portfolio (based on Statkraft data only). The remainder of the WMO's area generated by an algorithm whose coefficients are decided by experts. Whilst there is some testing of the variables, it is based on univariate analysis and so the results are at best difficult to interpret.
-#Method
-##Data source
-##Data cleaning and aggregation
-
-#Results
-Include a chart that shows a boxplot of the top 5 contributers to the WMO over the whole portfolio
-#conclusions
-
-#Appendix

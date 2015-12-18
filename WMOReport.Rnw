@@ -1,0 +1,436 @@
+\documentclass{article}
+\title{The WMO Comparison and development}
+\author{Jonathan.S.Bourne\\ 
+\texttt{jonathan.bourne.15@ucl.ac.uk} \\ \texttt{jonathan.bourne@statkraft.com}}
+\date{December 2015}
+\usepackage[backend=bibtex]{biblatex}
+        \addbibresource{export}
+\usepackage[section]{placeins} 
+
+\usepackage{hyperref}
+\usepackage{listings}
+  \lstset{
+    frame=single,
+    breaklines=true,
+    basicstyle=\ttfamily}
+
+\begin{document}
+
+
+<<set-options, echo=FALSE, warning=FALSE, message=FALSE>>=
+library(knitr)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+@
+
+
+<<package-loading, echo=FALSE, warning=FALSE, message=FALSE, include= FALSE>>=
+packages <- c("dplyr", "tidyr", "magrittr", "openxlsx", "caret","ggplot2", "xtable")
+
+invisible(lapply(packages, require, character.only= TRUE))
+select <- dplyr::select #Clash between dplyr and MASS which is loaded bby Caret
+filter <- dplyr::filter
+
+file.loc <-file.path("~","Benchmarking", "PA consulting", "2015", "Statkraft") #file location may be computer specific depending on network
+setwd(file.loc)
+opts_knit$set(root.dir = file.loc)
+options(xtable.comment=FALSE)
+@
+
+<<echo=FALSE, warning=FALSE, message=FALSE, include= FALSE>>=
+#Load data from R file
+load("WMOData.R")
+#add in smaller than 30MW factor
+data_raw <- data 
+notcols <- which(names(data) %in% c("mean_3yr_2014", "WMO_DV"))
+trans <-data[,-notcols] %>% preProcess(., mmethod = c("BoxCox","center", "scale") )
+data[,-notcols] <- predict(trans, data[,-notcols])
+
+#converts from factors to numerics, is bad, but as all factors are set to binary shouldn't make any real difference.
+catag <- names(data)[sapply(data, class)=="logical"]
+data <- data %>%  mutate_each_(funs(as.numeric),catag)
+
+@
+
+
+<<echo=FALSE, warning=FALSE, message=FALSE, include= FALSE>>=
+
+nokperWMO <-sum(data$mean_3yr_2014)/sum(data$WMO_DV)
+data %<>% mutate(wmo_cost = WMO_DV*nokperWMO)
+#Calculate adjusted R squared for the VVO model
+ rsq <- 1 - sum((data$mean_3yr_2014-data$wmo_cost)^2)/sum((data$mean_3yr_2014-mean(data$mean_3yr_2014))^2)
+reg <-40 
+n <- nrow(data)
+adj.rsq <- round(rsq-(1-rsq)*reg/(n-reg-1), 2)
+@
+
+
+<<>>=
+#Create training and test sets
+#  set.seed(1902)
+#  traindatarows <- createDataPartition(data$mean_3yr_2014, p=0.8)
+#  testdata <- data[-traindatarows[[1]],]
+#  data <- data[traindatarows[[1]],]
+
+@
+
+
+<<echo=FALSE, warning=FALSE, message=FALSE>>=
+#Create variety of statistical models
+train_control <- trainControl(method="cv", number=10)
+datamod <- data %>% select(Storage..Runofriver.plant:mean_3yr_2014)
+#testdata <- testdata %>% select(Visible.penstock_sum:mean_3yr_2014)
+finalcol <- which(names(datamod) =="mean_3yr_2014")-1
+#datamod2<-datamod[,!sapply(datamod, class)=="logical"]
+#finalcol2 <- which(names(datamod2) =="mean_3yr_2014")-1
+
+modelnames<-c("BaseReg","ReducedReg","MWReg","WMOReg", "RidgeReg", "RFReg","MARSReg", "SVMReg")
+
+if(length(list.files(pattern= "ReducedReg.RData"))==1){
+  load("ReducedReg.RData")
+} else {
+  BaseReg <-train(mean_3yr_2014 ~ ., datamod, trControl=train_control,  method = "lm")
+  ReducedReg <-train(mean_3yr_2014 ~ ., datamod, method = "lmStepAIC")
+  coefnames <- as.data.frame(coef(ReducedReg$finalModel))
+  ReducedReg <-datamod %>% select_(.dots=rownames(coefnames)[-1]) %>%train(data$mean_3yr_2014 ~ ., ., method = "lm")
+  save(list = c('ReducedReg', 'BaseReg'), file ="ReducedReg.RData")
+}
+
+#This code makes a regression with interaction on everything used in the Reduced regression model. The R squared si extremly high but there are not enough observations to make a valid model.
+# ReducedReg2 <-datamod %>% select_(.dots=rownames(coefnames)[-1]) %>%
+#   train(datamod$mean_3yr_2014 ~ .*., ., method = "lmStepAIC",direction = "forward")
+# coefnames2 <- as.data.frame(coef(ReducedReg2$finalModel))
+# names(coefnames2) <- "variables"
+# coefnames2 %<>% filter(!is.na(variables))
+
+if(length(list.files(pattern= "regressions.RData"))==1){
+  load("regressions.RData")
+} else {
+MWReg <- train(mean_3yr_2014 ~Installed.capacity_sum,data = datamod, trControl=train_control,method="lm")
+WMOReg <- train(datamod$mean_3yr_2014 ~ 0 +data$WMO_DV, data = datamod,trControl=train_control ,method="lm")
+#ridgereg <- train(datamod2[,1:finalcol2],datamod2$mean_3yr_2014, method='enet')
+set.seed(2001)
+RFReg <- train(datamod[,1:finalcol],datamod$mean_3yr_2014, method='rf', importance = TRUE)
+MARSReg <- train(datamod[,1:finalcol],datamod$mean_3yr_2014, trControl=train_control, method='earth')
+#svmreg <- train(datamod2[,1:finalcol2],datamod2$mean_3yr_2014, method='svmPoly', type ="Regression" )
+treeVarimp <- varImp(RFReg)
+save(list = c(modelnames[c(3:4, 6:7)], "treeVarimp"), file ="regressions.RData")
+}
+
+coefnames <- as.data.frame(coef(ReducedReg$finalModel))
+
+#modelperf <- sapply(modelnames, function(n) {
+#      postResample(predict(eval(parse(text=n)), data), data$mean_3yr_2014)
+#    }
+#  ) %>% t %>% data.frame
+#modelperf %<>% transmute(Variables = rownames(modelperf), Rsquared=signif(Rsquared,3),RMSE=round(RMSE)) %>% arrange(-Rsquared)
+
+@
+
+<<>>=
+models <- c("WMOReg","BaseReg","ReducedReg", "MWReg", "RFReg", "MARSReg")
+IDs <- c("WMO", "Base", "Reduced", "MW", "RF", "MARS")
+result <- sapply(models, function(n) {
+     postResample(predict(eval(parse(text=n)), data), data$mean_3yr_2014)
+   }
+ ) %>% t %>% data.frame
+result %<>% transmute(Models = rownames(result), Rsquared=signif(Rsquared,3),RMSE=round(RMSE)) 
+
+rsqd <-  sapply(models[1:4], function(n) unlist(summary(eval(parse(text=n)))[8:9]))%>%
+  t %>% round(2) %>% as.data.frame(row.names = IDs) %>% rbind(NA,NA)
+rsqd[1,2] <- adj.rsq
+
+num_vars <- c(40,length(coef(BaseReg$finalModel)), length(coef(ReducedReg$finalModel)), length(coef(MWReg$finalModel)),ncol(datamod),ncol(datamod))
+
+result <- cbind(result, Adjusted_Rsqd =rsqd[,2] ,Variables = num_vars) %>% 
+              arrange(RMSE) 
+
+perf <- signif((result$RMSE[4]-result$RMSE[2])/result$RMSE[4],3)*100
+perfRF <- signif((result$RMSE[4]-result$RMSE[1])/result$RMSE[4],3)*100
+@
+
+
+
+<<>>=
+#Needs work
+#makes the chart dataframe
+res <- data.frame(sapply(models, function(n) fitted(eval(parse(text=n)))))
+names(res) <- IDs
+#Tidies the data set so that the data frame can be made into a plot
+#there is a problem in the gather here
+res <- cbind(sap.code= data$Station.ID, costs = data$mean_3yr_2014 , res)%>% 
+  gather(key= model, value= Prediction,-costs, -sap.code)
+#res[res$model=="WMO",c(2,4)] <- select(data, mean_3yr_2014, wmo_cost)
+res <- mutate(res, diff = costs - Prediction, percentage_error = diff/costs)
+
+
+negatives <- res %>% filter(Prediction<0)
+@
+
+
+\maketitle
+
+  
+\begin{figure}[h]
+  \centering
+  \begin{minipage}[b]{0.4\textwidth}
+    \includegraphics[width=\textwidth]{UCLlogo.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.4\textwidth}
+    \includegraphics[width=\textwidth]{logotype-statkraft.jpg}
+  \end{minipage}
+\end{figure}
+
+\newpage
+
+\abstract
+The WMO is currently used to benchmark Nordic Hydro-power companies. This analysis explores how effectively the WMO performs when compared to statistical models. The findings show that the WMO is consistently the worst performer across all metrics. An alternative model is proposed which reduces the RMSE by \Sexpr{perf}\% for the linear case and \Sexpr{perfRF}\% for the nonlinear one. The conclusion is that the WMO should be replaced by a statistical model that would be both easier to understand and more accurate. But that expert knowledge is required optimise the model.
+
+ \begin{center}
+\section*{Acknowledgments} 
+Frode Bilstad from Eidsiva and Stian Henriksen from E-CO for providing detailed high quality data sets of there power plant portfolios. Arne Hanto Moen Statkraft, for coordinating between companies and providing project guidance.
+ \end{center}
+\newpage
+ 
+ \tableofcontents
+
+
+\newpage
+
+\section{Introduction}
+\subsection{Backgound}
+The WMO has been used in Norway since the the early 2000's as a way of normalising costs between Power Plants of different physical characteristics. It is the defacto standard within Norway and has some use in other Countries within the Nordics. An area of difficulty within the WMO is that the concept of a Weighted Maintenance Object is entirely abstract having no real expression in measurable reality. In addition the way that the total WMO's per Power Plant is calculated is convoluted, whilst a mathematical definition of the model doesn't exist. This has made it very difficult to measure how effective the model is at capturing the variance between Power Plants. In order to understand the WMO it is necessary to understand its development.The model was developed by Statkraft, Norway's largest Power Company, together with PA consulting. At the time the model was developed Statkraft wasn't able to produce cost data down to the granularity of a Power Plant but to the level of a so called 'Power Plant Group'. A Power Plant Group are a collection of distinct Power Plants that share geographical proximity, they may also share hydrological resources. In order to get around this problem the Weighted Maintenance Object was invented.
+
+\subsection{Defining a WMO}
+A WMO is a unit of maintenance complexity, the idea being that the number of WMO's is proportional to the amount of maintenance that a Power Plant needs and therefore the amount of money that is required to maintain it. It was believed that by calculating the total Number of WMO's per Power Plant group and finding the ratio of WMO's to spend on maintenance it would then be possible to compare the cost effectiveness of different Power Plants or groups using this newly created metric. The method of creation of WMO's is partially statistical partially expert based. Work by Sintef found a relationship between generator size, quantity and maintenance cost, and this work was used to create part of the system which accounts for approximately 60\% of the total amount of WMO's across the portfolio (based on Statkraft data only). The remainder of the WMO's area generated by an algorithm whose coefficients are decided by experts. Whilst there is some testing of the variables, it is based on uni variate analysis and so the results are at best difficult to interpret.
+\newpage
+\section{Method}
+This analysis is based on an exploratory analysis of statkraft data that was performed early 2015 \cite{Bourne2015}. The data set has been expanded to include power plants from Eidsiva Energi and Eco Energi. A comparison with models beyond multiple linear regression has aslo been included.
+
+\subsection{Data source}
+There were two main sources of data one for technical data and the other for WMO and financial data. The technical data file was the data input workbook in xlsx format used for submission of data in to the WMO benchmarking. This allowed minimal work from the the partner companies and provide the most reasonable comparison of the WMO as the data source used is identical to that available to the WMO. The financial information was provided in a template format by each of the companies involved. This second file was also an xlsx workbook and had to be produced specially for the the experiment by the partner companies.
+
+\subsection{Data cleaning and aggregation}
+The structure of the submission documents used for the WMO process is such that there were a lot of categorical variables and continuous variables that required aggregation. An example would be the valves submission sheet which included, amongst others, gate type (categorical) and gate area (Continuous). As there is usually more than one gate per powerplant aggregation was required. For catagoricals the method was to split the variable into counts of each type, for example total sector gates and total radial gates. For continuous variables the method found the mean max sum and variance for each power plant. This series of aggregations resulted in over 200 distinct variables, all N/A values were filled with zeros.
+  
+  Although fast the automatic feature generation created many variables that were highly correlated, in linear models this can cause co-linearity and result in unstable results. In order to avoid the worst affects of co-linearity all variables that had pairwise correlations greater than 0.9 were removed, in addition variables that had zero or near zero variance were also removed, this had the effect of reducing the total number of variables down to 134.
+  
+  Cost data was taken as the average of 2012, 2013 and 2014, plants that did not have a complete data set for these years were removed from the analysis, in addition plants that did not have a WMO number were also removed from the analysis. Generally these removals only affected smaller plants however it should be noted that some larger plants were removed e.g. Tysso 2.
+  The data was centered, scaled, and a box cox transform performed to put all the variables on the same scale and reduce skew.This is important for models such as linear regressions which are sensitive to non-normal data, or models that require data to be on a similar scale relative to their variance.
+  
+\subsection {Modelling}
+
+Modelling was performed mostly using the caret package in r \cite{Kuhn2015} and following the concepts described by Kuhn and Johnson in their book "Applied Predictive Modelling"\cite{Kuhn2013}. The linear models were used due to their ease of interpretation there were four such models fitted, In addition two nonlinear methods were also evaluated, these models can be harder to interpret but can also give very strong performance if the data is nonlinear.
+  \begin{itemize}
+  \item Base Regression: A multilinear model made up of all variables
+  \item Reduced Regression: A multilinear model made up of a subset of variables chosen through stepwise backwards regression optimising the AIC, the algorithm uses the MASS package\cite{Venables2002}.
+  \item Mw Regression: Uses only Mw as the only regressor
+  \item WMO Regression: Regresses the WMO's unit cost against actual cost
+  \item Random Forest: Stochasitc Bagged nonlinear regression
+  \item MARS: Multi Adaptive Regression Splines, a nonlinear technique
+\end{itemize}
+J.Hair etal provide an excelletn introduction to Multilinear regression \cite{Hair2009}, A less techincal description can be found in Provost and Fawcett \cite{Provost2013}
+
+
+\subsection{Modelling WMO's}
+As the purpose of the WMO is to measure the complexity of a power plant on the assumption that the complexity of a power plant is proportional to the cost to run Operate and maintain a power plant then it follows that a power plants WMOs are proportional to the cost of power plant, and two power plants would have the same ratio of cost to WMO's if they were operated equally as effectively. In this case to obtain the ratio of NOK per WMO the total of cost of all plants in the analysis were divided by the total number of WMO's, which gave a value of \Sexpr{round(nokperWMO)}KNOK/WMO.
+  As the structure and underlying equation of the WMO is difficult, it was decided that certain assumptions would be made, the total number of variables was taken to be 40, which is roughly the same as the total number of input variables in the model but ignores categorical values and interactions making 40 lower than the true number. In order to calculate the $R^2$ the total number of observations was needed this was assumed to be the same as the data set.
+
+\section{Results}
+
+\subsection{comparing between models}  
+
+  The results of the model generation process are shown in table \ref{tab:comp}, It is clear that the WMO is out performed by every model across all metrics. Accounting for the number of variable included the adjusted $R^2$ of the Reduced variable model shows it to be the best performing of the models reducing the error of the WMO model by  \Sexpr{perf}\%.  The results shown in table \ref{tab:comp} are only for in sample data, the RMSE on out of sample data will generally be lower. The Random Forest and MARS Regressions do not have adjusted $R^2$ because they work in a different way and such a metric isn't relevant, however the RMSE is still a valid, and as is seen they are effective. 
+
+\subsection{Results of special interest}
+
+Inspecting the the variable importance chart, or the Reduced Regression, shows that although the installed capacity and number of units ranks highly, other variables that are not so expected have also made the top 10, see figure \ref{fig:varimp}. One explanation for this is that although very highly correlated information has been removed the variables that have been regressed against are still correlated with each other as can be seen by figure \ref{fig:heatmap}. As the actual coefficients don't match up to the intuitive expected results further work is required to look the corellations more closely, to see if a more manual approach to feature selection would result in a variable weighting that would be more intuitive. 
+
+  As mentioned in the caption of figure \ref{fig:heatmap} the results could be due hidden or latent factors meaning that several variables are expressing similar information, for example larger power stations tend to have higher head than smaller ones, as a result head may be being used as a proxy for Mw. A solution to this problem is to use dimension reduction techniques such as PCA or PSLR to reduce the data set to it's underlying factors, this would howver make variable interpretation more difficult as the variables we can measure e.g. hydraulic head would only be facets of a variable we couldn't measure for example some abstract measure of physical size. 
+  
+  A different approach would take into account interaction between variables, that would mean having a variable that represented both hydraulic head and Mw, this would probably mean the role of hydraulic head and other variables would become less important but it could greatly increase the number of variables, as a test, brutforcing by running a forword step regression with all variable interacting with all other variables resulted in a regression of 108 variables which is not acceptable for a training dataset of 109 observations. taking an approach in between fully automatic and fully manual feature selection may be the best method performing intial feature selection with stepwise regression and then including interaction terms manually with expert guidence.
+
+Interestingly there were \Sexpr{nrow(negatives)} predictions which had a negative cost for running a power plant, The power plants were a mix of all companies and all the predictions were from the Base and Reduced models, despite them being by far the better performers than the WMO and MW models. This could suggest that the linear approach is not correct, (Also support by the strong results from the Random Forest model). Perhaps including some squared terms would prevent the error and improve accuracy. It should also be noted that this problem affects mostly smaller power stations including a categorical variable related to total MW output may help improve cost accuracy by accounting for different maintenance and support requirements of small and large power stations.
+
+<<results='asis'>>=
+  print(xtable(result,caption = "Comparison of the different models produced",
+label = "tab:comp"),type="latex")
+
+@
+
+
+
+  
+
+\begin{figure}[h]
+\begin{center}
+<<>>=
+  ReducedVarimp <- varImp(ReducedReg)
+  ReducedVarimp <-data.frame(ReducedVarimp[1]) %>% mutate(Variables = rownames(.))
+  ReducedVarimp <- ReducedVarimp %>%arrange(-Overall)
+  ReducedVarimp <-ReducedVarimp[1:10,]
+  ReducedVarimp$Variables <- as.factor(ReducedVarimp$Variables)
+  ReducedVarimp$Variables <-factor(ReducedVarimp$Variables,levels(ReducedVarimp$Variables)[rank(-ReducedVarimp$Overall)])
+
+  ggplot(ReducedVarimp, aes(x = reorder(Variables, -Overall), y= Overall))+ geom_point() +ggtitle("Reduced Regression Variable Importance top 10")+theme(axis.text.x=element_text(angle=90, vjust=0.5))+ylab("Importance scaled to by most\n important variable")+xlab("")+ylim(0,100)
+@
+    \caption{As can be seen the most important variables are Installed capcity and number of units. Whilst these may be intuitive other results can seem unsual this may be the result of corellations.}
+    \label{fig:varimp}
+    \end{center}
+  
+  \end{figure}
+
+
+\begin{figure}[h]
+\begin{center}
+<<>>=
+  
+  treeVarimp <-data.frame(treeVarimp[1]) %>% mutate(Variables = rownames(.))
+  treeVarimp %<>%arrange(-Overall)
+  treeVarimp <-treeVarimp[1:10,]
+  treeVarimp$Variables <- as.factor(treeVarimp$Variables)
+  treeVarimp$Variables <-factor(treeVarimp$Variables,levels(treeVarimp$Variables)[rank(-treeVarimp$Overall)])
+
+  ggplot(treeVarimp, aes(x = reorder(Variables, -Overall), y= Overall))+ geom_point() +ggtitle("Random Forest Variable Importance top 10")+theme(axis.text.x=element_text(angle=90, vjust=0.5))+ylab("Importance scaled to by most\n important variable")+xlab("")+ylim(0,100)
+@
+    \caption{The Random Forest is a nonlinear function that can produce very different results than that of the Multilinear regression, even so Installed capacity and Average production are very highly scoring, number of units comes further down the rankings.}
+    \label{fig:RFvarimp}
+    \end{center}
+  
+  \end{figure}
+
+
+
+  
+  \begin{figure}[h]
+  \begin{center}
+  <<>>=
+  datamod2 <-datamod %>% select_(.dots=rownames(coefnames)[-1])
+#  hc.rows <- hclust(dist(scale(datamod2)))
+ # hc.cols <- hclust(dist(t(scale(datamod2))))
+  
+  #plot(hc.rows)
+ 
+      corheatmap <-as.data.frame(cor(datamod2, use="p")) %>% mutate(pair1 = names(datamod2)) %>% gather(pair2, corval,-pair1 )
+  corheatmap$pair2 <-as.character(corheatmap$pair2) %>%as.factor %>%factor( levels=rev(levels(.)))
+  corheatmap$pair1 <- corheatmap$pair1 %>% as.factor
+  
+  ggplot(corheatmap, aes(x=pair1, y=pair2 )) +geom_tile(aes(fill=corval)) +theme(axis.text.y=element_blank(),axis.text.x=element_blank(),axis.ticks=element_blank(),
+                                                                                 axis.title.x=element_blank(),
+                                                                                 axis.title.y=element_blank())+scale_fill_gradient2(low = "blue",mid = "white",high = "red")+ggtitle("Heat map of corellations between variables")
+  
+  @
+    \end{center}
+  \caption{The correlations may explain some of the variable importance, Variables that correlate with MW may be representing it or some hidden factor.}
+  \label{fig:heatmap}
+  \end{figure}
+
+
+  \begin{figure}[h]
+  \begin{center}
+  <<>>=
+    res %>% filter(model != "RF",model != "MARS") %>% 
+    ggplot(., aes(x=costs, y=diff, colour= model))+geom_point() +
+    geom_abline(intercept = 0, slope = 0)+ggtitle("Comparing Model Erros")+
+    xlab("Power Plant O&M cost (KNOK)")+
+    ylab("Prediction Error (KNOK)")+
+    stat_smooth(method ="lm", se=FALSE)
+    @
+  \end{center}
+  \caption{The trend lines should be as close to the x axis as possible a model with a flat line would have 0 error. As can be seen the WMO has much greater error across the scale when compare to the Reduced and base regression.}
+  \label{descentxy1}
+  \end{figure}
+
+
+
+  \begin{figure}[h]
+  \begin{center}
+  <<>>=
+  
+  res2 <- res %>% filter(model=='Reduced') %>% group_by(sap.code) 
+  res2$company <- NA
+  res2$company[grep("Statkraft", res2$sap.code)] <-"Statkraft"
+  res2$company[grep("ECO", res2$sap.code)] <-"ECO"
+  res2$company[grep("Eidsiva", res2$sap.code)] <-"Eidsiva"
+  ggplot(res2, aes(x=company, y= diff, fill = company )) +geom_boxplot()+
+    ggtitle("Box plot of difference from prediction by company") +
+    ylab("Difference from prediction")+ xlab("Company")
+  
+  @
+  \end{center}
+  \caption{ Given that the model is appropriate smaller spread means more consistent operational costs, lower costs mean more operational effectiveness. The box plot shows that although the average prediction difference is close to 0 for all companies Eidsiva has the lowest over price but the largest spread in cost difference. Eco has the smallest cost spread.}
+  \label{compare}
+  \end{figure}
+  
+
+
+\section{Conclusion}
+
+The results of this Analysis have shown that the WMO has no statistical performance advantages over any other model option tested being outperformed across across all metrics, even being outperformed by the simple Mw regression. The difference between the performance of the WMO and reduced regression is large \Sexpr{perf}\% smaller RMSE as well as much greater adjusted $R^2$, the difference with the non linear model is \Sexpr{perfRF}\%. 
+
+However there is definitely room for improvement, the method of variable selection and feature generation used in this analysis, whilst effective, needs to be guided by experts in order to help remove model weaknesses, in his "Super Crunchers" Ian Ayers says "in the end, [statistical modelling] is not a substitute for intuition, but rather a complement" \cite{Ayres2007}
+and that can be seen in the problems shown by the models used in this report. This discussion process of selecting variables and considering interaction is already done effectively in the WMO framework and that process could be combined with the statistical methods shown here to improve model results.
+
+By changing the WMO to a multilinear model or even a nonlinear model, it would make the system much easier to understand, which helps promote actionable insights, In addition the performance increases would mean that it would be much clearer that it is not 'Apples compared to Oranges'. In conclusion changing the WMO should be seriously considered in order to improve the quality of Energy O\&M benchmarking in Nordics.
+
+\newpage
+\appendix
+
+\section{Reduced model Coefficients}
+<<results='asis'>>=
+as.data.frame(coef(ReducedReg$finalModel))%>%
+  xtable(caption="Full coefficient list of the Reduced Model") %>%
+  print(type ="latex")
+@
+\newpage
+\section{Predictions resulting in negative cost}
+<<results='asis'>>=
+  xtable(negatives ,caption="Power Plants for which negatives costs were returned given model") %>%  print(type ="latex")
+@
+
+\newpage
+\section{Code information}
+
+All code can be found at the git hub repository \href{https://github.com/JonnoB/Norwegian_Benchmarking}{here}
+
+%\lstinputlisting{Extract_shape_data.Rmd}
+
+An example of the data extraction code is below
+
+\begin{lstlisting}
+powerplant <- function(filename, company) {
+  power_plant_level <- read.xlsx(filename, sheet = "T Part A - Power plant level", 
+            startRow = 12, colNames = FALSE )[,1:26]
+  
+  names(power_plant_level) <- read.xlsx(filename, sheet = "T Part A - Power plant level" ,
+                                        startRow = 8, rows = 8:9)[,-c(1,27,28)]%>% 
+    names  %>% gsub("/|\\-|\\?", "",.)
+  power_plant_level %<>% filter(!is.na(Station.ID))
+   power_plant_level$Station.ID <- paste(company, power_plant_level$Station.ID, sep = "" )
+ names(power_plant_level) <- gsub("\\?","", names(power_plant_level))
+  power_plant_level 
+}
+\end{lstlisting}
+
+
+The aggregation of continuous variables is shown below
+\begin{lstlisting}
+rollup <- function(dataframe){
+        dataframe %>% 
+              group_by(Station.ID) %>% 
+              mutate(count = n()) %>% 
+              summarise_each_(funs(mean, max, min, sum, var), 
+                  names(.)[sapply(., class)=="numeric"|sapply(., class)=="integer"])
+}
+\end{lstlisting}
+
+generating the reduced model is shown below
+\begin{lstlisting}
+ReducedReg <-train(mean_3yr_2014 ~ ., datamod, method = "lmStepAIC")
+coefnames <- as.data.frame(coef(ReducedReg$finalModel))
+ReducedReg <-datamod %>% select_(.dots=rownames(coefnames)[-1]) %>%train(datamod$mean_3yr_2014 ~ ., ., method = "lm")
+\end{lstlisting}
+
+\printbibliography
+
+\end{document}
