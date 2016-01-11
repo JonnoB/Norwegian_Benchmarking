@@ -162,7 +162,17 @@ res <- cbind(sap.code= data$Station.ID, costs = data$mean_3yr_2014 , res)%>%
 #res[res$model=="WMO",c(2,4)] <- select(data, mean_3yr_2014, wmo_cost)
 res <- mutate(res, diff = costs - Prediction, percentage_error = diff/costs)
 
-
+  res2 <- res #%>% filter(model=='Reduced') %>% group_by(sap.code) 
+  res2$company <- NA
+  res2$company[grep("Statkraft", res2$sap.code)] <-"Statkraft"
+  res2$company[grep("ECO", res2$sap.code)] <-"ECO"
+  res2$company[grep("Eidsiva", res2$sap.code)] <-"Eidsiva"
+  
+numPlants <- data.frame(Companies = c("Statkraft", "Eidsiva", "ECO"), 
+            Plants = c(sum(res2$company =="Statkraft" & res2$model =="WMO"),
+                        sum(res2$company =="Eidsiva" & res2$model =="WMO"),
+                        sum(res2$company =="ECO" & res2$model =="WMO"))
+            )
 negatives <- res %>% filter(Prediction<0)
 
 toterr <- res %>% group_by(model) %>% summarise(meanerr = mean(abs(diff)))
@@ -190,7 +200,7 @@ toterr$model <-factor(toterr$model,levels(toterr$model)[c(4,6,1,3,2,5)])
 \newpage
 
 \abstract
-The WMO is currently used to benchmark Nordic Hydro-power companies. This analysis explores how effectively the WMO performs when compared to statistical models. The findings show that the WMO is consistently the worst performer across all metrics. An alternative model is proposed which reduces the RMSE by \Sexpr{perf}\% for the linear case and \Sexpr{perfRF}\% for the nonlinear one. In addition average error per plant was decreased by upto 1 million NOK per year using the Random Forest method.  The conclusion is that the WMO should be replaced by a statistical model that would be both easier to understand and more accurate. But that expert knowledge is required optimise the model.
+The WMO is currently used to benchmark Nordic Hydro-power companies. This analysis explores how effectively the WMO performs when compared to statistical models. The findings show that their are several models which provide a considerable performance boost over the WMO. Two alternative models are proposed which reduces the RMSE by \Sexpr{perf}\% for the linear case and \Sexpr{perfRF}\% for the nonlinear one. In addition average error per plant was decreased by upto 1 million NOK per year using the Random Forest method.  The conclusion is that the WMO should be replaced by a statistical model that would be both easier to understand and more accurate. But that expert knowledge is required optimise the model.
 
  \begin{center}
 \section*{Acknowledgments} 
@@ -205,16 +215,23 @@ Frode Bilstad from Eidsiva and Stian Henriksen from E-CO for providing detailed 
 
 \section{Introduction}
 \subsection{Backgound}
-The WMO has been used in Norway since the the early 2000's as a way of normalising costs between Power Plants of different physical characteristics. It is the defacto standard within Norway and has some use in other Countries within the Nordics. An area of difficulty within the WMO is that the concept of a Weighted Maintenance Object is entirely abstract having no real expression in measurable reality. In addition the way that the total WMO's per Power Plant is calculated is convoluted, whilst a mathematical definition of the model doesn't exist. This has made it very difficult to measure how effective the model is at capturing the variance between Power Plants. In order to understand the WMO it is necessary to understand its development.The model was developed by Statkraft, Norway's largest Power Company, together with PA consulting. At the time the model was developed Statkraft wasn't able to produce cost data down to the granularity of a Power Plant but to the level of a so called 'Power Plant Group'. A Power Plant Group are a collection of distinct Power Plants that share geographical proximity, they may also share hydrological resources. In order to get around this problem the Weighted Maintenance Object was invented.
+The WMO has been used in Norway since the the early 2000's as a way of normalising costs between Power Plants of different physical characteristics. It is the defacto standard within Norway and has some use in other Countries within the Nordics. An area of difficulty within the WMO is that the concept of a Weighted Maintenance Object is abstract having no real expression in measurable reality. In addition the way that the total WMO's per Power Plant is calculated is convoluted, whilst a mathematical definition of the model doesn't exist. This has made it very difficult to measure how effective the model is at capturing the variance between Power Plants. In order to understand the WMO it is necessary to understand its development.The model was developed by Statkraft, Norway's largest Power Company, together with PA consulting.The goal was to benchmark power companies against each other on a high level. At the time the model was developed Statkraft wasn't able to produce cost data down to the granularity of a Power Plant but to the level of a so called 'Power Plant Group'. A Power Plant Group are a collection of distinct Power Plants that share geographical proximity, they may also share hydrological resources. In order to get around this problem the Weighted Maintenance Object was invented.
 
 \subsection{Defining a WMO}
-A WMO is a unit of maintenance complexity, the idea being that the number of WMO's is proportional to the amount of maintenance that a Power Plant needs and therefore the amount of money that is required to maintain it. It was believed that by calculating the total Number of WMO's per Power Plant group and finding the ratio of WMO's to spend on maintenance it would then be possible to compare the cost effectiveness of different Power Plants or groups using this newly created metric. The method of creation of WMO's is partially statistical partially expert based. Work by Sintef found a relationship between generator size, quantity and maintenance cost, and this work was used to create part of the system which accounts for approximately 60\% of the total amount of WMO's across the portfolio (based on Statkraft data only). The remainder of the WMO's area generated by an algorithm whose coefficients are decided by experts. Whilst there is some testing of the variables, it is based on uni variate analysis and so the results are at best difficult to interpret.
+A WMO is a unit of maintenance complexity, the idea being that the number of WMO's is proportional to the amount of maintenance that a Power Plant needs and therefore the amount of money that is required to maintain it. It was believed that by calculating the total Number of WMO's per Power Plant group and finding the ratio of WMO's to spend on maintenance it would then be possible to compare the cost effectiveness of different Power Plants or groups using this newly created metric. The method of creation of WMO's is partially statistical partially expert based. Work by Sintef found a relationship between generator size, quantity and maintenance cost, and this work was used to create part of the system which accounts for approximately 60\% of the total amount of WMO's across the portfolio (based on Statkraft data only). The remainder of the WMO's area generated by an algorithm whose coefficients are decided by experts. Whilst there is some testing of the variables, it is based on uni variate analysis and so the results could be difficult to interpret.
+
 \newpage
 \section{Method}
 This analysis is based on an exploratory analysis of statkraft data that was performed early 2015 \cite{Bourne2015}. The data set has been expanded to include power plants from Eidsiva Energi and Eco Energi. A comparison with models beyond multiple linear regression has aslo been included.
 
 \subsection{Data source}
 There were two main sources of data one for technical data and the other for WMO and financial data. The technical data file was the data input workbook in xlsx format used for submission of data in to the WMO benchmarking. This allowed minimal work from the the partner companies and provide the most reasonable comparison of the WMO as the data source used is identical to that available to the WMO. The financial information was provided in a template format by each of the companies involved. This second file was also an xlsx workbook and had to be produced specially for the the experiment by the partner companies.
+The variable cost for operating a power station varies from less than 1 million NOK for the smallest power stations and close to 30 million NOK for the largest ones.
+
+
+<<results='asis'>>=
+  xtable(numPlants ,caption="Number of Power Plants from Each company included in the model") %>%  print(type ="latex")
+@
 
 \subsection{Data cleaning and aggregation}
 The structure of the submission documents used for the WMO process is such that there were a lot of categorical variables and continuous variables that required aggregation. An example would be the valves submission sheet which included, amongst others, gate type (categorical) and gate area (Continuous). As there is usually more than one gate per powerplant aggregation was required. For catagoricals the method was to split the variable into counts of each type, for example total sector gates and total radial gates. For continuous variables the method found the mean max sum and variance for each power plant. This series of aggregations resulted in over 200 distinct variables, all N/A values were filled with zeros.
@@ -353,11 +370,6 @@ label = "tab:comp"),type="latex")
   \begin{center}
   <<>>=
   
-  res2 <- res %>% filter(model=='Reduced') %>% group_by(sap.code) 
-  res2$company <- NA
-  res2$company[grep("Statkraft", res2$sap.code)] <-"Statkraft"
-  res2$company[grep("ECO", res2$sap.code)] <-"ECO"
-  res2$company[grep("Eidsiva", res2$sap.code)] <-"Eidsiva"
   ggplot(res2, aes(x=company, y= diff, fill = company )) +geom_boxplot()+
     ggtitle("Box plot of difference from prediction by company") +
     ylab("Difference from prediction")+ xlab("Company")
@@ -386,7 +398,7 @@ ylab("Mean Error per plant per year")+
 
 \section{Conclusion}
 
-The results of this Analysis have shown that the WMO has no statistical performance advantages over any other model option tested being outperformed across across all metrics, even being outperformed by the simple Mw regression. The difference between the performance of the WMO and reduced regression is large \Sexpr{perf}\% smaller RMSE as well as much greater adjusted $R^2$, the difference with the non linear model is \Sexpr{perfRF}\%. The difference of average error per plant of upto 1 Million Nok per year, show that improving the mode can result in better revenue streams. 
+The results of this Analysis have shown that the WMO has no statistical performance advantages over any other model option tested being outperformed across across all metrics. The difference between the performance of the WMO and reduced regression is large \Sexpr{perf}\% smaller RMSE as well as much greater adjusted $R^2$, the difference with the non linear model is \Sexpr{perfRF}\%. The difference of average error per plant of upto 1 Million Nok per year, show that improving the mode can result in better revenue streams. 
 
 However there is definitely room for improvement, the method of variable selection and feature generation used in this analysis, whilst effective, needs to be guided by experts in order to help remove model weaknesses, in his "Super Crunchers" Ian Ayers says "in the end, [statistical modelling] is not a substitute for intuition, but rather a complement" \cite{Ayres2007}
 and that can be seen in the problems shown by the models used in this report. This discussion process of selecting variables and considering interaction is already done effectively in the WMO framework and that process could be combined with the statistical methods shown here to improve model results.

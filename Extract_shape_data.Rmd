@@ -37,7 +37,11 @@ powerplant <- function(filename, company) {
   power_plant_level %<>% filter(!is.na(Station.ID))
    power_plant_level$Station.ID <- paste(company, power_plant_level$Station.ID, sep = "" )
  names(power_plant_level) <- gsub("\\?","", names(power_plant_level))
-  power_plant_level 
+  
+ names(power_plant_level)[grep("Commisioning", names(power_plant_level))] <- "Age"
+  year <-substr(Sys.Date(), 1, 4) %>% as.integer
+  power_plant_level %<>% mutate(Age = year-Age)
+  power_plant_level
 }
 
 gen_spec <- function(filename, company){
@@ -52,7 +56,11 @@ catag <-c("Turbine.type","Reversible.pump.turbine","Turbine.with.2.or.more.runne
 gen_spec %<>%mutate_each_(funs(factor),catag) %>% 
           group_by(Station.ID) %>% 
           mutate(specID = 1, specID = paste(Station.ID,"_",cumsum(specID),sep="")) %>% 
-  ungroup  
+  ungroup  %>% select(-Comissioning.year.of.station)
+
+ names(gen_spec)[grep("Comissioning.year.of.generator", names(gen_spec))] <- "Gen.Age"
+  year <-substr(Sys.Date(), 1, 4) %>% as.integer
+  gen_spec %<>% mutate(Gen.Age = year-Gen.Age)
 gen_spec
 }
 
@@ -139,12 +147,12 @@ aggregator <- function(data) {
     data
 }
 
-combinatron <- function(filename, comapanyname){
-plantspec <- powerplant(filename, comapanyname) #%>% aggregator
-genspec <- gen_spec(filename, comapanyname) %>% aggregator
-damspec <- dam_spec(filename, comapanyname) %>% aggregator
-gatespec <- gates_spec(filename, comapanyname) %>% aggregator
-valvespec <- valves_spec(filename, comapanyname) %>% aggregator
+combinatron <- function(filename, companyname){
+plantspec <- powerplant(filename, companyname) #%>% aggregator
+genspec <- gen_spec(filename, companyname) %>% aggregator
+damspec <- dam_spec(filename, companyname) %>% aggregator
+gatespec <- gates_spec(filename, companyname) %>% aggregator
+valvespec <- valves_spec(filename, companyname) %>% aggregator
 plantspec %<>% full_join(., genspec ,by="Station.ID") %>% 
                 full_join(., damspec ,by="Station.ID") %>%
                 full_join(., gatespec ,by="Station.ID") %>%
@@ -169,8 +177,8 @@ Eidsiva <- combinatron("Eidsiva 2013 DD1 (31.04.2014).xlsx","Eidsiva")
 # eidsdam <-dam_spec("Eidsiva 2013 DD1 (31.04.2014).xlsx","Eidsiva")
 # company <- "Eidsiva"
 # filename <- "Eidsiva 2013 DD1 (31.04.2014).xlsx"
-# company <- "Statkraft"
-# filename <- "Data Gathering Sheet 2015 V2.xlsx"
+ companyname <- "Statkraft"
+ filename <- "Data Gathering Sheet 2015 V2.xlsx"
 ```
 
 ```{r}
@@ -192,7 +200,8 @@ techdata %<>% select(
        -Area,
        -Sub.area,
        -Catchment.area,
-       -X6) %>% 
+       -X6,
+       -Turbine.with.2.or.more.runners_N) %>% 
   mutate(Water.cooled.windings_Y= (Water.cooled.windings_Y >0),
          Climate.zone_1= (Climate.zone_1 >0),
          Climate.zone_2= (Climate.zone_2 >0),
@@ -200,9 +209,20 @@ techdata %<>% select(
          Reversible.pump.turbine_Y= (Reversible.pump.turbine_Y >0),
          Distance_from_roads_geq1_Y= (Distance_from_roads_geq1_Y >0),
          Storage..Runofriver.plant=Storage..Runofriver.plant=="R",
-         Station.above.ground =Station.above.ground=="Y")
+         Station.above.ground =Station.above.ground=="Y") 
 
-x <- techdata
+orig <- c("pure.Hydrologial.meteorological", "Runofriver", "Headrace")
+change <- c("Hydro.metering.stations", "Run.of.river", "Headrace")
+
+for (i in 1:length(orig) ) 
+  {
+      names(techdata)[grep(orig[i], names(techdata))] <- change[i]
+}
+  
+for (i in c("Height", "Breadth", "Area") )
+{
+    names(techdata)[grep(i, names(techdata))] <- paste("Gate_",names(techdata)[grep(i, names(techdata))], sep="")
+}
 ```
 
 
